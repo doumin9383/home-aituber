@@ -1,0 +1,13 @@
+{
+  "mode": "passive_radio",
+  "level": "unknown_initial",
+  "known_phrases": [],
+  "weak_phrases": [],
+  "annoying_patterns": [
+    "forced quizzes",
+    "too much grammar",
+    "textbook tone",
+    "over-explaining"
+  ],
+  "preferred_explanation_language": "ja"
+}

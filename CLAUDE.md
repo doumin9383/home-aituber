@@ -1,156 +1,92 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code / AI assistants when working on HomeAITuber.
 
-## Project Overview
+## Project Identity
 
-Open-LLM-VTuber is a voice-interactive AI companion with Live2D avatar support that runs completely offline. It's a cross-platform Python application supporting real-time voice conversations, visual perception, and Live2D character animations. The project features modular architecture for LLM, ASR (Automatic Speech Recognition), TTS (Text-to-Speech), and other components.
+HomeAITuber is a fork of **Open-LLM-VTuber** with a private household layer added.
+
+- **Repository**: `doumin9383/home-aituber`
+- **Upstream**: `Open-LLM-VTuber/Open-LLM-VTuber`
+- **Display name**: HomeAITuber
+- **Subtitle**: 逸汎の誤家庭向け常駐AITuber
+- **Tagline**: A local-first personal AITuber for ordinary households
+- **Specification**: See [SPEC.md](./SPEC.md) for full design document
+
+## Core Architecture Principle
+
+> Open-LLM-VTuber = **body**
+> soul/ = **continuity**
+> Mattermost = **control/log window**
+> Hermes = **hands**
+> AIRI = **future vessel**
+
+## Directory Structure
+
+```
+home-aituber/
+  ├─ src/open_llm_vtuber/       # Open-LLM-VTuber upstream backend (keep as-is)
+  ├─ homeaituber/                # HomeAITuber-specific layer
+  │   ├─ radio_prompt_builder.py
+  │   ├─ mattermost_adapter.py
+  │   ├─ feedback_logger.py
+  │   ├─ memory_worker.py
+  │   └─ audio_only_frontend/
+  ├─ soul/                       # Local state directory (identity, memory, weights)
+  │   ├─ identity.md
+  │   ├─ user_profile.json
+  │   ├─ topic_weights.json
+  │   ├─ learning_state.json
+  │   ├─ review_queue.json
+  │   ├─ dream_journal.jsonl
+  │   ├─ daily_cache.md
+  │   └─ feedback_log.jsonl
+  ├─ characters/                 # Character configs (Open-LLM-VTuber)
+  ├─ config_templates/           # Default configs
+  ├─ chat_history/               # Conversation logs
+  └─ SPEC.md                     # Full specification
+```
+
+## Key Development Rules
+
+### Hot path must stay fast
+Radio tick / user input → persona + daily_cache → Speaker LLM → TTS → playback
+Must NOT require: full memory scan, Hermes, tool execution, filesystem search, RAG.
+
+### Radio output format (Phase 1+)
+```json
+{
+  "segment_id": "radio-YYYYMMDD-HHMMSS",
+  "en": "English sentence",
+  "jp": "日本語訳",
+  "en_repeat": "Same English (slightly slower)",
+  "phrase": "One useful expression",
+  "note": "Short Japanese explanation",
+  "topic": "...",
+  "safety": { "uses_private_data": false, "requires_external_access": false }
+}
+```
+
+### Privacy doctrine
+- WAN exposure disabled by default
+- No filesystem-wide read access
+- No browser history / credential scanning
+- Allowed dirs by default: `./soul`, `./chat_history`, `./cache`, `./config`
 
 ## Essential Commands
 
-### Development Setup
-- **Install dependencies**: `uv sync` (uses uv package manager)
+- **Install deps**: `uv sync`
 - **Run server**: `uv run run_server.py`
-- **Run with verbose logging**: `uv run run_server.py --verbose`
-- **Update project**: `uv run upgrade.py`
+- **Lint**: `ruff check .`
+- **Format**: `ruff format .`
 
-### Code Quality
-- **Lint code**: `ruff check .`
-- **Format code**: `ruff format .`
-- **Run pre-commit hooks**: `pre-commit run --all-files`
+## Upstream Information
 
-### Server Configuration
-- **Main config file**: `conf.yaml` (user configuration)
-- **Default configs**: `config_templates/conf.default.yaml` and `config_templates/conf.ZH.default.yaml`
-- **Character configs**: `characters/` directory (YAML files)
+Open-LLM-VTuber is at v1 (v2 rewrite in planning). The following components are provided by upstream and should be preserved:
+- `src/open_llm_vtuber/` — all backend code (ASR, TTS, VAD, WebSocket, config, conversations)
+- `characters/` — character YAML definitions
+- `avatars/`, `backgrounds/`, `live2d-models/` — visual assets
+- `frontend/` — web UI (git submodule)
+- `run_server.py` — entry point
 
-## Architecture Overview
-
-### Core Components
-
-**WebSocket Server** (`src/open_llm_vtuber/server.py`):
-- FastAPI-based server handling WebSocket connections
-- Serves frontend, Live2D models, and static assets
-- Supports both main client and proxy WebSocket endpoints
-
-**Service Context** (`src/open_llm_vtuber/service_context.py`):
-- Central dependency injection container
-- Manages all engines (LLM, ASR, TTS, VAD, etc.)
-- Each WebSocket connection gets its own service context instance
-
-**WebSocket Handler** (`src/open_llm_vtuber/websocket_handler.py`):
-- Routes WebSocket messages to appropriate handlers
-- Manages client connections, groups, and conversation state
-- Handles audio data, conversation triggers, and Live2D interactions
-
-### Modular Engine System
-
-The project uses a factory pattern for all AI engines:
-
-**Agent System** (`src/open_llm_vtuber/agent/`):
-- `agent_factory.py` - Factory for creating different agent types
-- `agents/` - Various agent implementations (basic_memory, hume_ai, letta, mem0)
-- `stateless_llm/` - Stateless LLM implementations (Claude, OpenAI, Ollama, etc.)
-
-**ASR Engines** (`src/open_llm_vtuber/asr/`):
-- Support for multiple ASR backends: Sherpa-ONNX, FunASR, Faster-Whisper, OpenAI Whisper, etc.
-- Factory pattern for engine selection based on configuration
-
-**TTS Engines** (`src/open_llm_vtuber/tts/`):
-- Multiple TTS options: Azure TTS, Edge TTS, MeloTTS, CosyVoice, GPT-SoVITS, etc.
-- Configurable voice cloning and multi-language support
-
-**VAD (Voice Activity Detection)** (`src/open_llm_vtuber/vad/`):
-- Silero VAD for detecting speech activity
-- Essential for voice interruption without feedback loops
-
-### Configuration Management
-
-**Config System** (`src/open_llm_vtuber/config_manager/`):
-- Type-safe configuration classes for each component
-- Automatic validation and loading from YAML files
-- Support for multiple character configurations and config switching
-
-### Conversation System
-
-**Conversation Handling** (`src/open_llm_vtuber/conversations/`):
-- `conversation_handler.py` - Main conversation orchestration
-- `single_conversation.py` - Individual user conversations
-- `group_conversation.py` - Multi-user group conversations
-- `tts_manager.py` - Audio streaming and TTS management
-
-### MCP (Model Context Protocol) Integration
-
-**MCP System** (`src/open_llm_vtuber/mcpp/`):
-- Tool execution and server registry
-- JSON detection and parameter extraction
-- Integration with various MCP servers for extended functionality
-
-## Key Development Patterns
-
-### Error Handling
-The codebase uses the missing `_cleanup_failed_connection` method pattern - when implementing new WebSocket handlers, ensure proper cleanup methods are implemented.
-
-### Live2D Integration
-- Models stored in `live2d-models/` directory
-- Each model has its own `.model3.json` configuration
-- Expression and motion control through WebSocket messages
-
-### Audio Processing
-- Real-time audio streaming through WebSocket
-- Voice interruption support without headphones
-- Multi-format audio support with proper codec handling
-
-### Multi-language Support
-- Character configurations support multiple languages
-- TTS translation capabilities (speak in different language than input)
-- I18n system for UI elements
-
-## Important File Locations
-
-- **Entry point**: `run_server.py`
-- **Main server**: `src/open_llm_vtuber/server.py`
-- **WebSocket routing**: `src/open_llm_vtuber/routes.py`
-- **Configuration**: `conf.yaml` (user), `config_templates/` (defaults)
-- **Frontend**: `frontend/` (Git submodule)
-- **Live2D models**: `live2d-models/`
-- **Character definitions**: `characters/`
-- **Chat history**: `chat_history/`
-- **Cache**: `cache/` (audio files, temporary data)
-
-## Development Guidelines
-
-### Adding New Engines
-1. Create interface in appropriate directory (e.g., `asr_interface.py`)
-2. Implement concrete class following existing patterns
-3. Add to factory class (e.g., `asr_factory.py`)
-4. Update configuration classes in `config_manager/`
-5. Add configuration options to default YAML files
-
-### WebSocket Message Handling
-1. Add message type to `MessageType` enum in `websocket_handler.py`
-2. Create handler method following `_handle_*` pattern
-3. Register in `_init_message_handlers()` dictionary
-4. Ensure proper error handling and client response
-
-### Configuration Changes
-- Always update both default config templates
-- Maintain backward compatibility when possible
-- Use the upgrade system for breaking changes
-- Validate configurations in respective config manager classes
-
-## Testing and Quality Assurance
-
-The project uses:
-- **Ruff** for linting and formatting (configured in `pyproject.toml`)
-- **Pre-commit hooks** for automated quality checks
-- **GitHub Actions** for CI/CD (`.github/workflows/`)
-- Manual testing through web interface and desktop client
-
-## Package Management
-
-Uses **uv** (modern Python package manager):
-- Dependencies defined in `pyproject.toml`
-- Lock file: `uv.lock`
-- Generated requirements: `requirements.txt` (auto-generated)
-- Optional dependencies for specific features (e.g., `bilibili` extra)
+HomeAITuber additions go into `homeaituber/` and `soul/` directories — **never modify upstream files unless absolutely necessary for integration hooks**.

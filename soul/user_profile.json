@@ -1,0 +1,25 @@
+{
+  "user_name": "Shuto",
+  "likes": [
+    "homelab",
+    "AI",
+    "weird internet culture",
+    "local-first tools",
+    "AITuber",
+    "Japanese tech culture",
+    "English learning without textbooks"
+  ],
+  "dislikes": [
+    "textbook English",
+    "corporate productivity tone",
+    "forced quizzes",
+    "surveillance-like behavior",
+    "walled gardens"
+  ],
+  "privacy_preferences": {
+    "wan_exposure": false,
+    "filesystem_default_access": "deny",
+    "family_visible": false
+  },
+  "updated_at": "2026-06-12T00:00:00Z"
+}
