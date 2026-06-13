@@ -145,6 +145,27 @@ def run(console_log_level: str):
     # Initialize the WebSocket server (synchronous part)
     server = WebSocketServer(config=config)
 
+    # ── HomeAITuber: Radio integration ──
+    from homeaituber.server_integration import RadioServerIntegration
+
+    radio_integration = RadioServerIntegration(
+        soul_dir=config.homeaituber_config.get("soul_dir", "soul") if hasattr(config, "homeaituber_config") else "soul",
+    )
+    radio_integration.attach_to_app(server.app)
+
+    @server.app.on_event("startup")
+    async def start_radio():
+        logger.info("Starting HomeAITuber Radio Engine...")
+        await radio_integration.start()
+        logger.info("HomeAITuber Radio Engine started.")
+
+    @server.app.on_event("shutdown")
+    async def stop_radio():
+        logger.info("Stopping HomeAITuber Radio Engine...")
+        await radio_integration.stop()
+        logger.info("HomeAITuber Radio Engine stopped.")
+    # ── End HomeAITuber radio integration ──
+
     # Perform asynchronous initialization (loading context, etc.)
     logger.info("Initializing server context...")
     try:
