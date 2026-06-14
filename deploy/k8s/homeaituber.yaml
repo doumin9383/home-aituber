@@ -1,14 +1,16 @@
 # HomeAITuber v0 Phase 1 — agent-build namespace 用マニフェスト
 #
 # Usage:
-#   kubectl apply -n agent-build -f deploy/k8s/
+#   kubectl apply -n agent-build -f deploy/k8s/homeaituber.yaml
 #
 # 前提:
 #   - llm-gateway または llm-inference namespace に LLM がデプロイ済み
-#   - HomeAITuber のソースコードが homeaituber-source PVC に存在（なければ初回起動時にclone）
+#   - GitHub Token が secret "github-token" に存在（namespace agent-build）
+#   - homeaituber-source PVC が存在（なければ初回起動時に自動生成）
 #
-# 注意:
-#   - Service は手動で作成する必要あり（このマニフェストからは別管理）
+# 外部アクセス:
+#   NodePort 30083 → Service 80 → containerPort 12393
+#   http://<k3s-node-ip>:30083/
 
 ---
 apiVersion: v1
@@ -28,25 +30,21 @@ data:
         group_conversation_prompt: 'group_conversation_prompt'
         mcp_prompt: 'mcp_prompt'
         proactive_speak_prompt: 'proactive_speak_prompt'
-        speakable_prompt: 'speakable_prompt'
 
+    # ── HomeAITuber radio mode config ──
     homeaituber_config:
-      # Radio mode settings
       radio:
         enabled: true
-        interval_seconds: 600  # 10 minutes
-        llm_model: "gemma4"
-        llm_base_url: "http://litellm.llm-gateway.svc.cluster.local"
-        llm_api_key: ""  # 空の場合は sk-local が使われる
+        interval_seconds: 600
+        llm_model: "Gemma-4-26B-A4B-it-NVFP4A16"
+        llm_base_url: "http://100.89.160.90:30099/v1"
+        llm_api_key: ""
 
-      # Live2D toggle (ON/OFF independent from radio)
       live2d:
-        enabled: true  # Set false for headless mode
+        enabled: true
 
-      # Soul directory
-      soul_dir: "/app/soul"
+      soul_dir: "/workspace/home-aituber/soul"
 
-      # Mattermost
       mattermost:
         enabled: false
         webhook_url: ""
@@ -54,7 +52,7 @@ data:
     character_config:
       conf_name: 'homeaituber'
       conf_uid: 'homeaituber_001'
-      live2d_model_name: ''
+      live2d_model_name: 'mao_pro'
       character_name: 'HomeAITuber'
       avatar: ''
       human_name: 'Master'
@@ -76,13 +74,18 @@ data:
           use_mcpp: false
       llm_configs:
         openai_compatible_llm:
-          base_url: 'http://litellm.llm-gateway.svc.cluster.local'
+          base_url: 'http://100.89.160.90:30099/v1'
           llm_api_key: 'sk-local'
-          model: 'gemma4'
+          model: 'Gemma-4-26B-A4B-it-NVFP4A16'
           temperature: 0.8
 
     asr_config:
-      asr_model: null  # Headless mode: no mic input needed
+      asr_model: 'sherpa_onnx_asr'
+      sherpa_onnx_asr:
+        model_type: 'sense_voice'
+        sense_voice: './models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx'
+        tokens: './models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt'
+        num_threads: 2
 
     tts_config:
       tts_model: 'edge_tts'
@@ -103,7 +106,7 @@ metadata:
     component: aituber
     phase: "1"
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -123,39 +126,67 @@ spec:
           args:
             - |
               set -eu
-set -eu
-# Install system deps
-apt-get update && apt-get install -y --no-install-recommends \
-  git curl ca-certificates build-essential ffmpeg \
-  libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev pkg-config \
-  && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
+              # ── 1. System deps ──
+              apt-get update && apt-get install -y --no-install-recommends \
+                git curl ca-certificates build-essential ffmpeg \
+                libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev pkg-config \
+                && rm -rf /var/lib/apt/lists/*
 
-# Clone or pull source (git preserves .git for fast updates)
-export GIT_TOKEN="${GITHUB_TOKEN:-}"
-if [ -z "$GIT_TOKEN" ]; then
-  echo "FATAL: GITHUB_TOKEN required"
-  exit 1
-fi
+              # ── 2. Install uv ──
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
 
-if [ -d /workspace/home-aituber/.git ]; then
-  cd /workspace/home-aituber
-  git remote set-url origin https://oauth2:${GIT_TOKEN}@github.com/doumin9383/home-aituber.git
-  git fetch origin
-  git reset --hard origin/main
-else
-  cd /workspace
-  git clone https://oauth2:${GIT_TOKEN}@github.com/doumin9383/home-aituber.git
-fi
+              # ── 3. Clone/pull source ──
+              export GIT_TOKEN="${GITHUB_TOKEN:-}"
+              if [ -z "$GIT_TOKEN" ]; then
+                echo "FATAL: GITHUB_TOKEN required"
+                exit 1
+              fi
 
-cd /workspace/home-aituber
-uv sync
+              if [ -d /workspace/home-aituber/.git ]; then
+                cd /workspace/home-aituber
+                git remote set-url origin https://oauth2:***@github.com/doumin9383/home-aituber.git
+                git fetch origin
+                git reset --hard origin/main
+              else
+                cd /workspace
+                git clone https://oauth2:***@github.com/doumin9383/home-aituber.git
+                cd /workspace/home-aituber
+              fi
 
-echo "Starting HomeAITuber Radio Server..."
-exec uv run --no-sync python run_server.py
+              # ── 4. ConfigMap override ──
+              # Mounted ConfigMap at /etc/homeaituber-config/conf.yaml
+              # Override the repo default with ConfigMap settings
+              if [ -f /etc/homeaituber-config/conf.yaml ]; then
+                cp /etc/homeaituber-config/conf.yaml /workspace/home-aituber/conf.yaml
+                echo "ConfigMap conf.yaml applied"
+              fi
+
+              # ── 5. Patch frontend JS URLs (hardcoded ws/http) ──
+              # Replace ws://127.0.0.1:PORT with ws://<service>:PORT
+              # and http://127.0.0.1:PORT with http://<service>:PORT
+              find /workspace/home-aituber/frontend -name 'main-*.js' \
+                -exec sed -i 's|ws://127.0.0.1:12393|ws://0.0.0.0:12393|g' {} + 2>/dev/null || true
+              find /workspace/home-aituber/frontend -name 'main-*.js' \
+                -exec sed -i 's|http://127.0.0.1:12393|http://0.0.0.0:12393|g' {} + 2>/dev/null || true
+
+              # ── 6. Live2D model symlinks ──
+              mkdir -p /workspace/home-aituber/live2d-models
+              for model_dir in /workspace/home-aituber/live2d-models/*/; do
+                model_name=$(basename "$model_dir")
+                if [ -f "${model_dir}/runtime/${model_name}.model3.json" ] && [ ! -f "${model_dir}/${model_name}.model3.json" ]; then
+                  ln -sf "runtime/${model_name}.model3.json" "${model_dir}/${model_name}.model3.json"
+                fi
+              done
+
+              # ── 7. Install project deps ──
+              cd /workspace/home-aituber
+              uv sync
+
+              # ── 8. Start server ──
+              echo "Starting HomeAITuber Radio Server..."
+              exec uv run --no-sync python run_server.py
           ports:
             - containerPort: 12393
               name: webui
@@ -171,6 +202,9 @@ exec uv run --no-sync python run_server.py
           volumeMounts:
             - name: source
               mountPath: /workspace
+            - name: config
+              mountPath: /etc/homeaituber-config
+              readOnly: true
           resources:
             requests:
               memory: "2Gi"
@@ -182,8 +216,12 @@ exec uv run --no-sync python run_server.py
         - name: source
           persistentVolumeClaim:
             claimName: homeaituber-source
+        - name: config
+          configMap:
+            name: homeaituber-config
 
 ---
+# NodePort Service — externalアクセス用
 apiVersion: v1
 kind: Service
 metadata:
@@ -192,13 +230,14 @@ metadata:
   labels:
     app: homeaituber
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: homeaituber
   ports:
     - name: webui
       port: 80
       targetPort: 12393
+      nodePort: 30083
 
 ---
 # PVC for source code (NAS-backed)
@@ -214,3 +253,19 @@ spec:
   resources:
     requests:
       storage: 10Gi
+---
+# RoleBinding: agents 名前空間の SA に agent-build へのアクセス権を付与
+# 初回のみ: kubectl create namespace agent-build
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hermes-homeaituber
+  namespace: agent-build
+subjects:
+  - kind: ServiceAccount
+    name: hermes-open-llm-vtuber
+    namespace: agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit

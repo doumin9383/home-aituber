@@ -150,8 +150,17 @@ def run(console_log_level: str):
     sys.path.insert(0, os.path.dirname(__file__))
     from homeaituber.server_integration import RadioServerIntegration
 
+    # Read raw YAML to extract homeaituber_config (Pydantic ignores extra fields)
+    import yaml
+    with open("conf.yaml") as _f:
+        _raw_config = yaml.safe_load(_f)
+    _radio_config = _raw_config.get("homeaituber_config", {})
+
     radio_integration = RadioServerIntegration(
-        soul_dir=config.homeaituber_config.get("soul_dir", "soul") if hasattr(config, "homeaituber_config") else "soul",
+        soul_dir=_radio_config.get("soul_dir", "soul"),
+        llm_base_url=_radio_config.get("radio", {}).get("llm_base_url", "http://100.89.160.90:30099/v1"),
+        llm_model=_radio_config.get("radio", {}).get("llm_model", "Gemma-4-26B-A4B-it-NVFP4A16"),
+        interval_seconds=_radio_config.get("radio", {}).get("interval_seconds", 600),
     )
     radio_integration.attach_to_app(server.app)
 
