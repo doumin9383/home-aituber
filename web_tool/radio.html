@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeAITuber Radio Control</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            line-height: 1.6;
+        }
+        h1 { color: #ff6b9d; border-bottom: 2px solid #16213e; padding-bottom: 10px; }
+        h2 { color: #a8d8ea; }
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            border: 1px solid #0f3460;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-dot.running { background: #4ecca3; }
+        .status-dot.stopped { background: #ff6b6b; }
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: #4ecca3; color: #1a1a2e; }
+        .btn-primary:hover { background: #3db88f; }
+        .btn-danger { background: #ff6b6b; color: white; }
+        .btn-danger:hover { background: #e05555; }
+        .btn-secondary { background: #0f3460; color: #e0e0e0; }
+        .btn-secondary:hover { background: #1a4a7a; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .segment-box {
+            background: #0f3460;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+        }
+        .field { margin: 4px 0; }
+        .field-label { color: #a8d8ea; font-weight: bold; }
+        .field-en { color: #4ecca3; }
+        .field-jp { color: #ffd93d; }
+        .controls-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        input[type="number"] {
+            background: #0f3460;
+            border: 1px solid #1a4a7a;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            width: 80px;
+        }
+        input[type="text"], textarea {
+            background: #0f3460;
+            border: 1px solid #1a4a7a;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            width: 100%;
+            box-sizing: border-box;
+            margin: 5px 0;
+        }
+        .log-area {
+            background: #0a0a1a;
+            border-radius: 8px;
+            padding: 15px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .log-entry { margin: 2px 0; }
+        .log-info { color: #4ecca3; }
+        .log-error { color: #ff6b6b; }
+        .log-segment { color: #ffd93d; }
+        .switch-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #555;
+            transition: .3s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px; width: 18px;
+            left: 3px; bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #4ecca3; }
+        input:checked + .slider:before { transform: translateX(20px); }
+    </style>
+</head>
+<body>
+    <h1>📻 HomeAITuber Radio Control</h1>
+    <p>Control radio mode — separate from Live2D visual frontend.</p>
+
+    <div class="card">
+        <h2>⏯️ Engine Status</h2>
+        <div class="controls-row">
+            <span id="engine-status">
+                <span class="status-dot stopped"></span> Stopped
+            </span>
+            <button class="btn btn-primary" id="btn-start">▶ Start Radio</button>
+            <button class="btn btn-danger" id="btn-stop" disabled>⏹ Stop Radio</button>
+            <button class="btn btn-secondary" id="btn-tick">🔘 Fire One Tick</button>
+        </div>
+        <div class="controls-row" style="margin-top: 10px;">
+            <label>Interval (seconds):
+                <input type="number" id="interval-input" value="600" min="30" max="86400">
+            </label>
+            <label class="switch-label">
+                <span class="switch">
+                    <input type="checkbox" id="live2d-toggle" checked>
+                    <span class="slider"></span>
+                </span>
+                Live2D enabled
+            </label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🎙️ Manual Command</h2>
+        <div class="controls-row">
+            <input type="text" id="command-input" placeholder="e.g. Talk about homelab AI" style="flex:1;">
+            <button class="btn btn-secondary" id="btn-command">Send</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📄 Latest Segment</h2>
+        <div id="latest-segment" class="segment-box">(no segment yet)</div>
+    </div>
+
+    <div class="card">
+        <h2>📋 Event Log</h2>
+        <div id="event-log" class="log-area"></div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let ws = null;
+        let radioRunning = false;
+
+        function log(msg, type = 'info') {
+            const logArea = document.getElementById('event-log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const ts = new Date().toLocaleTimeString();
+            entry.textContent = `[${ts}] ${msg}`;
+            logArea.appendChild(entry);
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        function updateEngineStatus(running) {
+            radioRunning = running;
+            const status = document.getElementById('engine-status');
+            if (running) {
+                status.innerHTML = '<span class="status-dot running"></span> Running';
+            } else {
+                status.innerHTML = '<span class="status-dot stopped"></span> Stopped';
+            }
+            document.getElementById('btn-start').disabled = running;
+            document.getElementById('btn-stop').disabled = !running;
+        }
+
+        function displaySegment(data) {
+            const box = document.getElementById('latest-segment');
+            if (!data) {
+                box.textContent = '(no segment yet)';
+                return;
+            }
+            let html = '';
+            if (data.en) html += `<div class="field"><span class="field-label">EN:</span> <span class="field-en">${escapeHtml(data.en)}</span></div>`;
+            if (data.jp) html += `<div class="field"><span class="field-label">JP:</span> <span class="field-jp">${escapeHtml(data.jp)}</span></div>`;
+            if (data.en_repeat) html += `<div class="field"><span class="field-label">Repeat:</span> ${escapeHtml(data.en_repeat)}</div>`;
+            if (data.phrase) html += `<div class="field"><span class="field-label">Phrase:</span> ${escapeHtml(data.phrase)}</div>`;
+            if (data.note) html += `<div class="field"><span class="field-label">Note:</span> ${escapeHtml(data.note)}</div>`;
+            if (data.topic) html += `<div class="field"><span class="field-label">Topic:</span> ${escapeHtml(data.topic)}</div>`;
+            box.innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function callAPI(action, payload = {}) {
+            try {
+                const resp = await fetch(`${API_BASE}/api/radio`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, ...payload }),
+                });
+                return await resp.json();
+            } catch (e) {
+                log(`API error: ${e.message}`, 'error');
+                return null;
+            }
+        }
+
+        // Connect to the Open-LLM-VTuber WebSocket for real-time updates
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                log('WebSocket connected', 'info');
+                ws.send(JSON.stringify({ type: 'radio-connect' }));
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'radio-segment') {
+                        log(`Segment: ${data.segment?.en?.substring(0, 50)}...`, 'segment');
+                        displaySegment(data.segment);
+                    } else if (data.type === 'radio-status') {
+                        updateEngineStatus(data.running);
+                        log(`Engine: ${data.running ? 'started' : 'stopped'}`, 'info');
+                    } else if (data.type === 'radio-log') {
+                        log(data.message, data.level || 'info');
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            };
+
+            ws.onclose = () => {
+                log('WebSocket disconnected', 'error');
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = () => {
+                log('WebSocket error', 'error');
+            };
+        }
+
+        // --- Event handlers ---
+
+        document.getElementById('btn-start').addEventListener('click', async () => {
+            const interval = parseInt(document.getElementById('interval-input').value, 10);
+            const result = await callAPI('start', { interval });
+            if (result?.status === 'ok') {
+                updateEngineStatus(true);
+                log(`Radio started (interval=${interval}s)`, 'info');
+            } else {
+                log(`Failed to start: ${result?.error || 'unknown'}`, 'error');
+            }
+        });
+
+        document.getElementById('btn-stop').addEventListener('click', async () => {
+            const result = await callAPI('stop');
+            if (result?.status === 'ok') {
+                updateEngineStatus(false);
+                log('Radio stopped', 'info');
+            } else {
+                log(`Failed to stop: ${result?.error || 'unknown'}`, 'error');
+            }
+        });
+
+        document.getElementById('btn-tick').addEventListener('click', async () => {
+            const command = document.getElementById('command-input').value.trim();
+            const result = await callAPI('tick', { command });
+            if (result?.status === 'ok') {
+                log(`Tick fired (${result.segment_id || 'unknown'})`, 'info');
+                if (result.segment) displaySegment(result.segment);
+            } else {
+                log(`Tick failed: ${result?.error || 'unknown'}`, 'error');
+            }
+        });
+
+        document.getElementById('btn-command').addEventListener('click', async () => {
+            const command = document.getElementById('command-input').value.trim();
+            if (!command) return;
+            const result = await callAPI('command', { command });
+            if (result?.status === 'ok') {
+                log(`Command sent: ${command}`, 'info');
+                if (result.segment) displaySegment(result.segment);
+            } else {
+                log(`Command failed: ${result?.error || 'unknown'}`, 'error');
+            }
+        });
+
+        // Live2D toggle
+        document.getElementById('live2d-toggle').addEventListener('change', async (e) => {
+            const result = await callAPI('live2d-toggle', { enabled: e.target.checked });
+            if (result?.status === 'ok') {
+                log(`Live2D ${e.target.checked ? 'enabled' : 'disabled'}`, 'info');
+            }
+        });
+
+        // Keyboard shortcut: Enter in command input fires command
+        document.getElementById('command-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('btn-command').click();
+        });
+
+        // Initialize
+        log('Radio Control Panel loaded', 'info');
+        connectWebSocket();
+    </script>
+</body>
+</html>

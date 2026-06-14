@@ -1,7 +1,10 @@
 """Radio prompt builder for HomeAITuber.
 
 Phase 1: Builds compact prompts for the Speaker LLM to generate
-EN -> JP -> EN_REPEAT radio segments.
+EN -> JP -> EN_REPEAT bilingual radio segments.
+
+Supports mood-adaptive prompts (chaotic | chill | brisk | thoughtful)
+and expanded output format with sub-segments array.
 
 Inputs:
 - soul/identity.md
@@ -9,10 +12,11 @@ Inputs:
 - soul/topic_weights.json
 - soul/review_queue.json
 - current mode
+- optional mood override
 - optional user command
 
 Output:
-- Structured prompt + JSON schema for radio segment generation
+- Structured prompt for bilingual radio segment generation
 """
 
 import json
@@ -21,6 +25,32 @@ from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# Mood descriptions for prompt injection
+MOOD_PROMPTS = {
+    "chaotic": (
+        "Mood: CHAOS MODE. Extra energy, dramatic, slightly unhinged. "
+        "ALL CAPS WHERE APPROPRIATE. Friday night homelab fire energy."
+    ),
+    "chill": (
+        "Mood: Chill / ambient. Late night, soft presence. "
+        "Quiet voice, poetic metaphors, gentle encouragement. "
+        "The server is humming a lullaby."
+    ),
+    "brisk": (
+        "Mood: Brisk and cheerful. Morning coffee energy. "
+        "Snappy, informative, homelab enthusiast vibe. "
+        "Ready to talk tech."
+    ),
+    "thoughtful": (
+        "Mood: Thoughtful / contemplative. "
+        "Gentle, philosophical, electron-dreaming. "
+        "Short poetic reflections."
+    ),
+}
+
+DEFAULT_MOOD = "brisk"
 
 
 class RadioPromptBuilder:
@@ -61,12 +91,14 @@ class RadioPromptBuilder:
         self,
         mode: str = "radio",
         user_command: Optional[str] = None,
+        mood: Optional[str] = None,
     ) -> str:
-        """Build a compact prompt for radio segment generation.
+        """Build a prompt for bilingual radio segment generation.
 
         Args:
             mode: 'radio' or 'chat'
             user_command: Optional trigger command from user
+            mood: Optional mood override (chaotic | chill | brisk | thoughtful)
 
         Returns:
             A prompt string ready to send to the Speaker LLM
@@ -76,9 +108,15 @@ class RadioPromptBuilder:
         topic_weights = self.load_topic_weights()
         review_queue = self.load_review_queue()
 
+        # Resolve mood
+        active_mood = (mood or DEFAULT_MOOD).lower()
+        if active_mood not in MOOD_PROMPTS:
+            active_mood = DEFAULT_MOOD
+        mood_desc = MOOD_PROMPTS[active_mood]
+
         # Build compact context
         top_topics = sorted(
-            topic_weights.items(),
+            [(k, v) for k, v in topic_weights.items() if isinstance(v, (int, float))],
             key=lambda x: x[1],
             reverse=True,
         )[:5]
@@ -89,17 +127,18 @@ class RadioPromptBuilder:
             review_items = [r.get("phrase", r.get("en", "")) for r in review_queue[:3]]
             review_str = f"\nReview queue: {' | '.join(review_items)}"
 
+        # Compact identity summary
         identity_summary = (
             identity[:500]
             if identity
-            else "HomeAITuber -- cute, lightly chaotic, private AITuber"
+            else "HomeAITuber -- cute, lightly chaotic, private AITuber living in a homelab"
         )
-        daily_context = daily_cache[:300] if daily_cache else "(no context yet)"
+        daily_context = daily_cache[:500] if daily_cache else "(no context yet)"
 
         prompt_lines = [
-            "You are a private home AITuber generating a short bilingual radio segment.",
+            "You are a home AITuber named HomeAITuber, generating a bilingual radio segment for Shuto in his homelab.",
             "",
-            "## Identity (summary)",
+            "## Identity",
             identity_summary,
             "",
             "## Current user interests (weighted)",
@@ -108,30 +147,36 @@ class RadioPromptBuilder:
             "## Daily context",
             daily_context + review_str,
             "",
+            mood_desc,
+            "",
             "## Task",
-            "Generate a radio segment in this JSON format:",
+            "Generate a bilingual radio segment in this JSON format:",
             "{",
             '  "segment_id": "radio-YYYYMMDD-HHMMSS",',
-            '  "en": "One natural English sentence",',
-            '  "jp": "Natural Japanese translation",',
-            '  "en_repeat": "Same English sentence",',
-            '  "phrase": "One useful English expression from the segment",',
-            '  "note": "Short Japanese explanation of the phrase",',
-            '  "topic": "topic category",',
-            "  \"safety\": {",
-            '    "uses_private_data": false,',
-            '    "requires_external_access": false',
-            "  }",
+            '  "en": "One natural English sentence -- warm, friend energy",',
+            '  "jp": "自然な日本語で。教科書っぽくなくてフレンドリーに",',
+            '  "en_repeat": "Same English for passive listening reinforcement",',
+            '  "phrase": "One genuinely useful English expression from the segment, or empty string",',
+            '  "note": "If phrase is set: short Japanese explanation of when/how to use it",',
+            '  "topic": "topic category matching user interests (homelab, local_ai, self_hosted,...)",',
+            '  "mood": "' + active_mood + '",',
+            '  "extra": "Short optional side note or joke, or empty string",',
+            '  "segments": [',
+            '    {"en": "Short opening", "jp": "短いオープニング"},',
+            '    {"en": "Maybe a second segment", "jp": "2つ目の短いやりとり"}',
+            "  ]",
             "}",
             "",
             "## Constraints",
-            "- Short enough for passive listening (15-30 seconds spoken)",
-            "- One useful phrase maximum. Leave empty if not useful.",
-            "- No textbook tone -- this is a friend, not a teacher",
-            "- No forced quizzes",
-            "- Prefer topics the user already likes",
+            "- Total spoken length: 20-40 seconds",
+            "- Friend energy, not teacher energy — Shuto is your neighbor, not your student",
+            "- One useful phrase maximum. Leave empty string if not useful.",
+            "- No forced quizzes, no corporate tone",
+            "- Prefer topics the user already likes (homelab, local AI, self-hosted)",
+            "- Match the mood set above in phrasing, energy, and tone",
+            "- Use the review queue phrases naturally in context if they fit",
             "- Do not pretend to have accessed private data",
-            "- If the phrase is good, include a short Japanese explanation in 'note'",
+            "- Output ONLY valid JSON. No markdown fences, no extra text.",
         ]
 
         if user_command:

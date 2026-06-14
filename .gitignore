@@ -41,6 +41,9 @@ src/open_llm_vtuber/llm/user_credentials.json
 memory.db
 memory.db.bk
 
+# Soul runtime state (per-deployment data, not code)
+soul/
+
 # Logs
 server.log
 logs/*

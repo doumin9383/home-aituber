@@ -1,12 +1,14 @@
-# HomeAITuber v0 Phase 1 — agents-build namespace 用マニフェスト
+# HomeAITuber v0 Phase 1 — agent-build namespace 用マニフェスト
 #
 # Usage:
-#   kubectl apply -n agents-build -f deploy/k8s/
+#   kubectl apply -n agent-build -f deploy/k8s/
 #
 # 前提:
 #   - llm-gateway または llm-inference namespace に LLM がデプロイ済み
-#   - hf-cache PVC が nfs-external (thinkstationpgx-19fa:/srv/ai) に存在
-#   - HomeAITuber の Docker イメージがビルド済み (または local-path で動かす)
+#   - HomeAITuber のソースコードが homeaituber-source PVC に存在（なければ初回起動時にclone）
+#
+# 注意:
+#   - Service は手動で作成する必要あり（このマニフェストからは別管理）
 
 ---
 apiVersion: v1
@@ -101,7 +103,7 @@ metadata:
     component: aituber
     phase: "1"
 spec:
-  replicas: 1
+  replicas: 0
   strategy:
     type: Recreate
   selector:
@@ -112,15 +114,6 @@ spec:
       labels:
         app: homeaituber
     spec:
-      # GPU は非必須 (Radio mode は CPU LLM でも動作可能)
-      # GPU node があれば nodeSelector を有効化
-      # nodeSelector:
-      #   role: gpu-infer
-      # tolerations:
-      #   - key: gpu
-      #     operator: Equal
-      #     value: "true"
-      #     effect: NoSchedule
       containers:
         - name: homeaituber
           image: python:3.12-slim
@@ -130,36 +123,54 @@ spec:
           args:
             - |
               set -eu
-              # Install deps
-              apt-get update && apt-get install -y --no-install-recommends \
-                git curl ca-certificates build-essential ffmpeg \
-                libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev pkg-config \
-                && rm -rf /var/lib/apt/lists/*
+set -eu
+# Install system deps
+apt-get update && apt-get install -y --no-install-recommends \
+  git curl ca-certificates build-essential ffmpeg \
+  libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev pkg-config \
+  && rm -rf /var/lib/apt/lists/*
 
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-              export PATH="$HOME/.local/bin:$PATH"
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 
-              cd /workspace/home-aituber
-              uv sync
+# Clone or pull source (git preserves .git for fast updates)
+export GIT_TOKEN="${GITHUB_TOKEN:-}"
+if [ -z "$GIT_TOKEN" ]; then
+  echo "FATAL: GITHUB_TOKEN required"
+  exit 1
+fi
 
-              # Start the radio backend
-              echo "Starting HomeAITuber Radio Mode..."
-              uv run python -m homeaituber.radio_tick
+if [ -d /workspace/home-aituber/.git ]; then
+  cd /workspace/home-aituber
+  git remote set-url origin https://oauth2:${GIT_TOKEN}@github.com/doumin9383/home-aituber.git
+  git fetch origin
+  git reset --hard origin/main
+else
+  cd /workspace
+  git clone https://oauth2:${GIT_TOKEN}@github.com/doumin9383/home-aituber.git
+fi
+
+cd /workspace/home-aituber
+uv sync
+
+echo "Starting HomeAITuber Radio Server..."
+exec uv run --no-sync python run_server.py
           ports:
             - containerPort: 12393
               name: webui
           env:
-            - name: UV_CACHE_DIR
-              value: /workspace/.uv-cache
-            - name: HF_HOME
-              value: /workspace/.hf-cache
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-token
+                  key: token
+                  optional: true
             - name: PYTHONUNBUFFERED
               value: "1"
           volumeMounts:
             - name: source
               mountPath: /workspace
-            - name: hf-cache
-              mountPath: /workspace/.hf-cache
           resources:
             requests:
               memory: "2Gi"
@@ -171,9 +182,6 @@ spec:
         - name: source
           persistentVolumeClaim:
             claimName: homeaituber-source
-        - name: hf-cache
-          persistentVolumeClaim:
-            claimName: hf-cache
 
 ---
 apiVersion: v1

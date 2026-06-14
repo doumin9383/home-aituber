@@ -17,7 +17,7 @@ HomeAITuber is a fork of **Open-LLM-VTuber** with a private household layer adde
 
 > Open-LLM-VTuber = **body**
 > soul/ = **continuity**
-> Mattermost = **control/log window**
+> Frontend Web UI = **control/log window**
 > Hermes = **hands**
 > AIRI = **future vessel**
 
@@ -28,9 +28,9 @@ home-aituber/
   ├─ src/open_llm_vtuber/       # Open-LLM-VTuber upstream backend (keep as-is)
   ├─ homeaituber/                # HomeAITuber-specific layer
   │   ├─ radio_prompt_builder.py
-  │   ├─ mattermost_adapter.py
+  │   ├─ radio_tick.py
+  │   ├─ memory_worker.py         # Comment → feedback → soul learning
   │   ├─ feedback_logger.py
-  │   ├─ memory_worker.py
   │   └─ audio_only_frontend/
   ├─ soul/                       # Local state directory (identity, memory, weights)
   │   ├─ identity.md
@@ -46,6 +46,31 @@ home-aituber/
   ├─ chat_history/               # Conversation logs
   └─ SPEC.md                     # Full specification
 ```
+
+## Implementation Status
+
+### ✅ Complete
+- **Phase 0**: Fork + rename + SPEC.md + soul/ + homeaituber/ layer
+- **Phase 1**: Radio mode core — radio_prompt_builder.py, radio_tick.py, audio_only_frontend/, web_tool/radio.html, tests, runbook
+
+### 🔄 Next (current focus)
+- ~~**Step A**: Initialize upstream frontend submodule~~ ✅
+- ~~**Step B**: Add Graphics ON/OFF toggle (Live2D disable for battery/bandwidth saving)~~ ✅
+- ~~**Step C**: Comment → feedback → soul learning pipeline (memory_worker.py)~~ ✅
+- ~~**Step D**: Wire radio_tick output to frontend WebSocket via notify_callback~~ ✅
+
+### ✅ Completed Steps A-D
+| Step | What | Files |
+|:----:|:-----|:------|
+| A | Frontend submodule init | `frontend/` (Open-LLM-VTuber-Web) |
+| B | Graphics toggle + branding | `frontend/index.html` (injected JS) |
+| C | Memory worker pipeline | `homeaituber/memory_worker.py`, `homeaituber/feedback_logger.py` |
+| D | Radio → WS + chat capture | `homeaituber/server_integration.py`, `/radio-ws`, `/api/feedback` |
+
+### ⬜ Deferred
+- **Phase 3**: Mattermost adapter (originally for MM audio calls, deprioritized)
+- **Phase 4**: Autonomous info collection & topic deck updates
+- **Phase 5**: k3s manifests apply (dev is local-first; also need conf.yaml adjustments)
 
 ## Key Development Rules
 
