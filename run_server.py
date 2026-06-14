@@ -162,7 +162,21 @@ def run(console_log_level: str):
         llm_model=_radio_config.get("radio", {}).get("llm_model", "Gemma-4-26B-A4B-it-NVFP4A16"),
         interval_seconds=_radio_config.get("radio", {}).get("interval_seconds", 600),
     )
+
+    # Move root static mount to end of routes so API routes take priority
+    # (StaticFiles at "" catches all paths, blocking /api/feedback etc.)
+    _frontend_mount = None
+    for _i, _r in enumerate(server.app.routes):
+        if hasattr(_r, "name") and _r.name == "frontend":
+            _frontend_mount = server.app.routes.pop(_i)
+            break
+
+    # Register radio endpoints BEFORE re-adding the root mount
     radio_integration.attach_to_app(server.app)
+
+    # Re-add root mount at end so it's checked last
+    if _frontend_mount is not None:
+        server.app.routes.append(_frontend_mount)
 
     @server.app.on_event("startup")
     async def start_radio():
