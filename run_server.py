@@ -146,6 +146,8 @@ def run(console_log_level: str):
     server = WebSocketServer(config=config)
 
     # ── HomeAITuber: Radio integration ──
+    import sys
+    sys.path.insert(0, os.path.dirname(__file__))
     from homeaituber.server_integration import RadioServerIntegration
 
     radio_integration = RadioServerIntegration(
