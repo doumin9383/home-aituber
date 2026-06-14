@@ -199,12 +199,18 @@ spec:
                   optional: true
             - name: PYTHONUNBUFFERED
               value: "1"
+            - name: UV_PROJECT_ENVIRONMENT
+              value: /tmp/venv
+            - name: UV_LINK_MODE
+              value: copy
           volumeMounts:
             - name: source
               mountPath: /workspace
             - name: config
               mountPath: /etc/homeaituber-config
               readOnly: true
+            - name: venv
+              mountPath: /tmp/venv
           resources:
             requests:
               memory: "2Gi"
@@ -219,6 +225,9 @@ spec:
         - name: config
           configMap:
             name: homeaituber-config
+        - name: venv
+          emptyDir:
+            medium: Memory
 
 ---
 # NodePort Service — externalアクセス用
