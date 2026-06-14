@@ -64,36 +64,36 @@ data:
         You do not access private data, scan the filesystem, or expose yourself to WAN.
         Your radio style is funny, natural, and never textbook-like.
 
-    agent_config:
-      conversation_agent_choice: 'basic_memory_agent'
-      agent_settings:
-        basic_memory_agent:
-          llm_provider: 'openai_compatible_llm'
-          faster_first_response: true
-          segment_method: 'pysbd'
-          use_mcpp: false
-      llm_configs:
-        openai_compatible_llm:
-          base_url: 'http://100.89.160.90:30099/v1'
-          llm_api_key: 'sk-local'
-          model: 'Gemma-4-26B-A4B-it-NVFP4A16'
-          temperature: 0.8
+      agent_config:
+        conversation_agent_choice: 'basic_memory_agent'
+        agent_settings:
+          basic_memory_agent:
+            llm_provider: 'openai_compatible_llm'
+            faster_first_response: true
+            segment_method: 'pysbd'
+            use_mcpp: false
+        llm_configs:
+          openai_compatible_llm:
+            base_url: 'http://100.89.160.90:30099/v1'
+            llm_api_key: 'sk-local'
+            model: 'Gemma-4-26B-A4B-it-NVFP4A16'
+            temperature: 0.8
 
-    asr_config:
-      asr_model: 'sherpa_onnx_asr'
-      sherpa_onnx_asr:
-        model_type: 'sense_voice'
-        sense_voice: './models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx'
-        tokens: './models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt'
-        num_threads: 2
+      asr_config:
+        asr_model: 'sherpa_onnx_asr'
+        sherpa_onnx_asr:
+          model_type: 'sense_voice'
+          sense_voice: './models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx'
+          tokens: './models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt'
+          num_threads: 2
 
-    tts_config:
-      tts_model: 'edge_tts'
-      edge_tts:
-        voice: 'en-US-AvaMultilingualNeural'
+      tts_config:
+        tts_model: 'edge_tts'
+        edge_tts:
+          voice: 'en-US-AvaMultilingualNeural'
 
-    vad_config:
-      vad_model: null
+      vad_config:
+        vad_model: null
 
 ---
 apiVersion: apps/v1
