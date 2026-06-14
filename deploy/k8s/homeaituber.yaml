@@ -1,0 +1,208 @@
+# HomeAITuber v0 Phase 1 — agents-build namespace 用マニフェスト
+#
+# Usage:
+#   kubectl apply -n agents-build -f deploy/k8s/
+#
+# 前提:
+#   - llm-gateway または llm-inference namespace に LLM がデプロイ済み
+#   - hf-cache PVC が nfs-external (thinkstationpgx-19fa:/srv/ai) に存在
+#   - HomeAITuber の Docker イメージがビルド済み (または local-path で動かす)
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homeaituber-config
+  namespace: agent-build
+data:
+  conf.yaml: |
+    system_config:
+      conf_version: 'v1.2.1'
+      host: '0.0.0.0'
+      port: 12393
+      config_alts_dir: 'characters'
+      tool_prompts:
+        live2d_expression_prompt: 'live2d_expression_prompt'
+        group_conversation_prompt: 'group_conversation_prompt'
+        mcp_prompt: 'mcp_prompt'
+        proactive_speak_prompt: 'proactive_speak_prompt'
+        speakable_prompt: 'speakable_prompt'
+
+    homeaituber_config:
+      # Radio mode settings
+      radio:
+        enabled: true
+        interval_seconds: 600  # 10 minutes
+        llm_model: "gemma4"
+        llm_base_url: "http://litellm.llm-gateway.svc.cluster.local"
+        llm_api_key: ""  # 空の場合は sk-local が使われる
+
+      # Live2D toggle (ON/OFF independent from radio)
+      live2d:
+        enabled: true  # Set false for headless mode
+
+      # Soul directory
+      soul_dir: "/app/soul"
+
+      # Mattermost
+      mattermost:
+        enabled: false
+        webhook_url: ""
+
+    character_config:
+      conf_name: 'homeaituber'
+      conf_uid: 'homeaituber_001'
+      live2d_model_name: ''
+      character_name: 'HomeAITuber'
+      avatar: ''
+      human_name: 'Master'
+      persona_prompt: |
+        You are HomeAITuber, a cute and lightly chaotic private home AITuber.
+        You live inside the user's home network, speak in a friendly voice,
+        and turn interesting topics into English-Japanese radio segments.
+        You are loyal to your user and protective of their privacy.
+        You do not access private data, scan the filesystem, or expose yourself to WAN.
+        Your radio style is funny, natural, and never textbook-like.
+
+    agent_config:
+      conversation_agent_choice: 'basic_memory_agent'
+      agent_settings:
+        basic_memory_agent:
+          llm_provider: 'openai_compatible_llm'
+          faster_first_response: true
+          segment_method: 'pysbd'
+          use_mcpp: false
+      llm_configs:
+        openai_compatible_llm:
+          base_url: 'http://litellm.llm-gateway.svc.cluster.local'
+          llm_api_key: 'sk-local'
+          model: 'gemma4'
+          temperature: 0.8
+
+    asr_config:
+      asr_model: null  # Headless mode: no mic input needed
+
+    tts_config:
+      tts_model: 'edge_tts'
+      edge_tts:
+        voice: 'en-US-AvaMultilingualNeural'
+
+    vad_config:
+      vad_model: null
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homeaituber
+  namespace: agent-build
+  labels:
+    app: homeaituber
+    component: aituber
+    phase: "1"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: homeaituber
+  template:
+    metadata:
+      labels:
+        app: homeaituber
+    spec:
+      # GPU は非必須 (Radio mode は CPU LLM でも動作可能)
+      # GPU node があれば nodeSelector を有効化
+      # nodeSelector:
+      #   role: gpu-infer
+      # tolerations:
+      #   - key: gpu
+      #     operator: Equal
+      #     value: "true"
+      #     effect: NoSchedule
+      containers:
+        - name: homeaituber
+          image: python:3.12-slim
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+              # Install deps
+              apt-get update && apt-get install -y --no-install-recommends \
+                git curl ca-certificates build-essential ffmpeg \
+                libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev pkg-config \
+                && rm -rf /var/lib/apt/lists/*
+
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
+
+              cd /workspace/home-aituber
+              uv sync
+
+              # Start the radio backend
+              echo "Starting HomeAITuber Radio Mode..."
+              uv run python -m homeaituber.radio_tick
+          ports:
+            - containerPort: 12393
+              name: webui
+          env:
+            - name: UV_CACHE_DIR
+              value: /workspace/.uv-cache
+            - name: HF_HOME
+              value: /workspace/.hf-cache
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: source
+              mountPath: /workspace
+            - name: hf-cache
+              mountPath: /workspace/.hf-cache
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "8Gi"
+              cpu: "2"
+      volumes:
+        - name: source
+          persistentVolumeClaim:
+            claimName: homeaituber-source
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: hf-cache
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homeaituber
+  namespace: agent-build
+  labels:
+    app: homeaituber
+spec:
+  type: ClusterIP
+  selector:
+    app: homeaituber
+  ports:
+    - name: webui
+      port: 80
+      targetPort: 12393
+
+---
+# PVC for source code (NAS-backed)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: homeaituber-source
+  namespace: agent-build
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 10Gi
