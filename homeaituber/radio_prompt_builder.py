@@ -195,7 +195,7 @@ class RadioPromptBuilder:
         # Randomly select segment style for natural length variation
         weights = [s["weight"] for s in SEGMENT_STYLES]
         style = random.choices(SEGMENT_STYLES, weights=weights, k=1)[0]
-        logger.debug(f"Radio segment style: {style['name']} ({style['target_seconds']}s)")
+        logger.info(f"Radio segment style: {style['name']} ({style['target_seconds']}s)")
 
         # Build compact context
         top_topics = sorted(
