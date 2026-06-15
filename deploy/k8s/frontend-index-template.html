@@ -59,7 +59,56 @@
           btn.style.opacity = disabled ? '0.6' : '1';
         }
 
+        // ── Live2D helpers ──
+        function _getLive2DModel() {
+          try {
+            const adapter = window.getLAppAdapter && window.getLAppAdapter();
+            return adapter && adapter.getModel();
+          } catch(e) { return null; }
+        }
+
+        function _setLive2DExpression(mood) {
+          try {
+            const model = _getLive2DModel();
+            if (!model || !model.setExpression) return;
+            const exprMap = {
+              chaotic: ['joy', 'smirk', 'surprise'],
+              chill: ['neutral'],
+              brisk: ['joy'],
+              thoughtful: ['neutral', 'sadness'],
+            };
+            const choices = exprMap[mood] || ['neutral'];
+            const expr = choices[Math.floor(Math.random() * choices.length)];
+            console.log('[HA Live2D] Expression:', expr, 'from mood:', mood);
+            model.setExpression(expr);
+          } catch(e) { console.warn('[HA Live2D] Expression failed:', e); }
+        }
+
+        function _startLive2DLipSync(url) {
+          try {
+            const model = _getLive2DModel();
+            if (model && model._wavFileHandler && model._lipsync) {
+              console.log('[HA Live2D] Lip sync start');
+              model._wavFileHandler.start(url);
+            }
+          } catch(e) { console.warn('[HA Live2D] Lip sync start failed:', e); }
+        }
+
+        function _stopLive2DLipSync() {
+          try {
+            const model = _getLive2DModel();
+            if (model && model._wavFileHandler) {
+              model._wavFileHandler.releasePcmData();
+              // Reset internal state to avoid stale RMS on next playback
+              if (model._wavFileHandler._lastRms !== undefined) model._wavFileHandler._lastRms = 0;
+              if (model._wavFileHandler._sampleOffset !== undefined) model._wavFileHandler._sampleOffset = 0;
+              if (model._wavFileHandler._userTimeSeconds !== undefined) model._wavFileHandler._userTimeSeconds = 0;
+            }
+          } catch(e) {}
+        }
+
         function stopAllRadioAudio() {
+          _stopLive2DLipSync();
           if (_currentAudio) {
             _currentAudio.pause();
             if (_currentAudio.src) URL.revokeObjectURL(_currentAudio.src);
@@ -170,6 +219,9 @@
           const old = document.getElementById('ha-radio-overlay');
           if (old) old.remove();
 
+          // ── Live2D expression from mood ──
+          _setLive2DExpression(seg.mood);
+
           const moodColors = { chaotic: '#ff6b6b', chill: '#a8d8ea', brisk: '#4ecca3', thoughtful: '#ffd93d' };
           const mc = moodColors[seg.mood] || '#4ecca3';
 
@@ -230,6 +282,12 @@
           const url = _radioAudioQueue.shift();
           const audio = new Audio(url);
           _currentAudio = audio;
+
+          // ── Live2D lip sync: feed WAV to Cubism handler when audio is ready ──
+          audio.addEventListener('canplaythrough', () => {
+            _startLive2DLipSync(url);
+          });
+
           audio.play().catch(e => {
             console.warn('[HA Radio] Audio play failed:', e);
             URL.revokeObjectURL(url);
@@ -238,6 +296,7 @@
             _playNextInQueue();
           });
           audio.onended = () => {
+            _stopLive2DLipSync();
             URL.revokeObjectURL(url);
             _currentAudio = null;
             _radioAudioPlaying = false;
