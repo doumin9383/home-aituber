@@ -42,17 +42,28 @@
           localStorage.setItem('ha-language', currentLanguage);
         }
 
-        // ── Root margin for chat input clearance ──
-        const PANEL_HANDLE_HEIGHT = 44; // collapsed bar height
+        // ── Push chat input above the control panel ──
+        // React app uses height:100% internally; body padding is ignored.
+        // Instead, inject/update a CSS rule targeting the chat message input directly.
+        const PANEL_HANDLE_HEIGHT = 44;
+        function _ensureMarginStyle() {
+          if (document.getElementById('ha-root-margin')) return;
+          const s = document.createElement('style');
+          s.id = 'ha-root-margin';
+          document.head.appendChild(s);
+        }
         function updateRootMargin() {
-          const body = document.body;
-          const panel = document.getElementById('ha-panel-container');
-          if (panelOpen && panel) {
-            const panelHeight = panel.getBoundingClientRect().height;
-            body.style.paddingBottom = panelHeight + 'px';
+          _ensureMarginStyle();
+          const styleEl = document.getElementById('ha-root-margin');
+          let margin;
+          if (panelOpen) {
+            const panel = document.getElementById('ha-panel-container');
+            const h = panel ? panel.getBoundingClientRect().height : 300;
+            margin = Math.ceil(h);
           } else {
-            body.style.paddingBottom = PANEL_HANDLE_HEIGHT + 'px';
+            margin = PANEL_HANDLE_HEIGHT;
           }
+          styleEl.textContent = `.cs-message-input { margin-bottom: ${margin}px !important; transition: margin-bottom 0.25s ease; }`;
         }
 
         // ── Live2D visibility ──
