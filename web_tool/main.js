@@ -231,7 +231,7 @@ function connectWebSocket() {
         generateSpeechBtn.disabled = true;
         ttsStatus.textContent = 'Disconnected. Trying to reconnect...';
         ttsStatus.className = 'status error';
-        
+
         // Clean up any pending audio resources
         audioBuffers = [];
         pendingAudioPaths.clear();
@@ -239,7 +239,7 @@ function connectWebSocket() {
             URL.revokeObjectURL(currentAudioPath);
             currentAudioPath = null;
         }
-        
+
         setTimeout(connectWebSocket, 5000);
     };
 
@@ -247,7 +247,7 @@ function connectWebSocket() {
         console.error('WebSocket error:', error);
         ttsStatus.textContent = 'Connection error. Retrying...';
         ttsStatus.className = 'status error';
-        
+
         // Clean up audio resources on error
         audioBuffers = [];
         pendingAudioPaths.clear();
@@ -257,6 +257,22 @@ function connectWebSocket() {
         }
     };
 }
+
+// Reconnect immediately when the tab becomes visible again (mobile wake-up).
+// Mobile browsers often keep the WS technically "open" but TCP is dead;
+// visibility-change forces a fresh handshake so we don't wait for the
+// 5s background reconnect timer to fire.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const isStale = !ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING;
+    if (isStale) {
+        console.log('TTS WebSocket: tab visible, reconnecting immediately...');
+        connectWebSocket();
+    }
+    // If ws looks "open" but might be a zombie (long background), try sending
+    // a no-op frame. /tts-ws server ignores empty messages, so this is safe.
+    try { ws.send(''); } catch (e) { connectWebSocket(); }
+});
 
 // Convert AudioBuffer to WAV with specific format requirements
 async function audioBufferToWav(buffer) {

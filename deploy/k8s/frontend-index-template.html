@@ -1,0 +1,182 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>HomeAITuber</title>
+    <link rel="stylesheet" crossorigin href="./assets/main-QEkl09-0.css">
+    <script>localStorage.removeItem("modelInfo");localStorage.setItem("wsUrl",JSON.stringify("ws://"+location.host+"/client-ws"));localStorage.setItem("baseUrl",JSON.stringify(location.origin))</script>
+    <script type="module" crossorigin src="./assets/main-nu7uwxNJ.js"></script>
+    <script>
+      // ── HomeAITuber customization ──
+      (function() {
+        // Graphics ON/OFF toggle state
+        let graphicsEnabled = true;
+
+        function hideLive2D(hide) {
+          const canvases = document.querySelectorAll('canvas');
+          const containers = document.querySelectorAll('[class*="live2d"], [id*="live2d"], [class*="Live2D"]');
+          canvases.forEach(el => { el.style.visibility = hide ? 'hidden' : 'visible'; });
+          containers.forEach(el => { el.style.display = hide ? 'none' : ''; });
+        }
+
+        function addToggleButton() {
+          if (document.getElementById('ha-graphics-toggle')) return;
+          const btn = document.createElement('button');
+          btn.id = 'ha-graphics-toggle';
+          btn.textContent = '🖼️ Graphics ON';
+          btn.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:9999;padding:8px 16px;border:none;border-radius:8px;background:#4ecca3;color:#1a1a2e;font-weight:600;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);transition:all 0.2s;';
+          btn.onmouseenter = () => { btn.style.opacity = '0.9'; };
+          btn.onmouseleave = () => { btn.style.opacity = '1'; };
+          btn.onclick = () => {
+            graphicsEnabled = !graphicsEnabled;
+            hideLive2D(!graphicsEnabled);
+            btn.textContent = graphicsEnabled ? '🖼️ Graphics ON' : '🎧 Graphics OFF (battery)';
+            btn.style.background = graphicsEnabled ? '#4ecca3' : '#ff6b6b';
+          };
+          document.body.appendChild(btn);
+        }
+
+        // ── Radio segment display + chat feedback ──
+        let radioWs = null;
+        let interceptOrigWs = true;
+        let _radioReconnectDelay = 1000;
+
+        function connectRadioWS() {
+          const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = `${proto}//${window.location.host}/radio-ws`;
+          try {
+            radioWs = new WebSocket(wsUrl);
+            radioWs.onopen = () => {
+              console.log('[HA Radio] Connected');
+              _radioReconnectDelay = 1000;
+            };
+            radioWs.onmessage = (event) => {
+              try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'radio-segment' && msg.segment) {
+                  showRadioSegment(msg.segment);
+                }
+              } catch(e) {}
+            };
+            radioWs.onclose = () => {
+              const delay = Math.min(_radioReconnectDelay * 2, 30000);
+              _radioReconnectDelay = delay;
+              console.log(`[HA Radio] Disconnected, reconnecting in ${delay/1000}s...`);
+              setTimeout(connectRadioWS, delay);
+            };
+            radioWs.onerror = () => console.warn('[HA Radio] WS error, will retry...');
+          } catch(e) {
+            setTimeout(connectRadioWS, 30000);
+          }
+        }
+
+        // Reconnect immediately when the tab becomes visible again (mobile wake-up)
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState !== 'visible') return;
+          const isStale = !radioWs || radioWs.readyState === WebSocket.CLOSED || radioWs.readyState === WebSocket.CLOSING;
+          if (isStale) {
+            console.log('[HA Radio] Tab visible, reconnecting immediately...');
+            connectRadioWS();
+            return;
+          }
+          try { radioWs.send(''); } catch (e) { connectRadioWS(); }
+        });
+
+        // Intercept the upstream WebSocket to capture chat messages
+        function interceptChatWebSocket() {
+          const origSend = WebSocket.prototype.send;
+          const parsedOrigin = new URL(window.location.origin);
+          const targetHost = parsedOrigin.host;
+          WebSocket.prototype.send = function(data) {
+            if (this.url && this.url.includes(targetHost)) {
+              try {
+                const msg = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data));
+                if (msg.type === 'text-input' && msg.text && radioWs && radioWs.readyState === WebSocket.OPEN) {
+                  radioWs.send(JSON.stringify({
+                    type: 'comment',
+                    text: msg.text,
+                    source: 'chat',
+                  }));
+                }
+              } catch(e) {}
+            }
+            return origSend.call(this, data);
+          };
+        }
+
+        function showRadioSegment(segment) {
+          const old = document.getElementById('ha-radio-overlay');
+          if (old) old.remove();
+
+          const overlay = document.createElement('div');
+          overlay.id = 'ha-radio-overlay';
+
+          const moodColors = { chaotic: '#ff6b6b', chill: '#a8d8ea', brisk: '#4ecca3', thoughtful: '#ffd93d' };
+          const moodColor = moodColors[segment.mood] || '#4ecca3';
+
+          overlay.innerHTML = `
+            <div style="background:#16213e;border:2px solid ${moodColor};border-radius:12px;padding:16px 20px;max-width:600px;margin:0 auto;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="color:${moodColor};font-weight:700;font-size:12px;text-transform:uppercase;">📻 Radio · ${segment.mood || 'brisk'}</span>
+                <span style="color:#888;font-size:11px;">${new Date().toLocaleTimeString()}</span>
+              </div>
+              <div style="color:#4ecca3;font-size:15px;margin:4px 0;">${escapeHtml(segment.en || '')}</div>
+              <div style="color:#ffd93d;font-size:14px;margin:4px 0;">${escapeHtml(segment.jp || '')}</div>
+              <div style="color:#a8d8ea;font-size:13px;margin:4px 0;font-style:italic;">${escapeHtml(segment.en_repeat || '')}</div>
+              ${segment.phrase ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #0f3460;color:#ff6b9d;font-size:13px;">💡 ${escapeHtml(segment.phrase)} — ${escapeHtml(segment.note || '')}</div>` : ''}
+            </div>
+          `;
+          overlay.style.cssText = 'position:fixed;bottom:80px;right:16px;z-index:9998;animation:haFadeIn 0.3s ease;transition:opacity 0.5s;';
+
+          document.body.appendChild(overlay);
+
+          setTimeout(() => {
+            overlay.style.opacity = '0';
+            setTimeout(() => overlay.remove(), 500);
+          }, 30000);
+        }
+
+        function escapeHtml(text) {
+          if (!text) return '';
+          const d = document.createElement('div');
+          d.textContent = text;
+          return d.innerHTML;
+        }
+
+        // Inject CSS animation
+        const style = document.createElement('style');
+        style.textContent = '@keyframes haFadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }';
+        document.head.appendChild(style);
+
+        // Wait for React app to mount then add toggle + radio + chat interceptor
+        let initDone = false;
+        const observer = new MutationObserver(() => {
+          if (!initDone && (document.querySelector('canvas') || document.querySelector('[class*="live2d"]'))) {
+            initDone = true;
+            addToggleButton();
+            connectRadioWS();
+            interceptChatWebSocket();
+            observer.disconnect();
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // Fallback
+        document.addEventListener('DOMContentLoaded', () => {
+          setTimeout(() => {
+            if (!initDone) {
+              addToggleButton();
+              connectRadioWS();
+              interceptChatWebSocket();
+              initDone = true;
+            }
+          }, 3000);
+        });
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

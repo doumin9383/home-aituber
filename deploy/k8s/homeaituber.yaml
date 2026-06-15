@@ -95,6 +95,20 @@ data:
       vad_config:
         vad_model: null
 
+      tts_preprocessor_config:
+        remove_special_char: true
+        ignore_brackets: true
+        ignore_parentheses: true
+        ignore_asterisks: true
+        ignore_angle_brackets: true
+
+        translator_config:
+          translate_audio: false
+          translate_provider: 'deeplx'
+          deeplx:
+            deeplx_target_lang: 'JA'
+            deeplx_api_endpoint: 'http://localhost:1188/v2/translate'
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -163,6 +177,15 @@ spec:
                 echo "ConfigMap conf.yaml applied"
               fi
 
+              # ── 4.5. Copy HomeAITuber frontend template over submodule ──
+              # The frontend/ directory is an upstream submodule (Open-LLM-VTuber-Web).
+              # Replace its vanilla index.html with our customized template that includes
+              # graphics toggle, radio segment overlay, chat interception, and
+              # visibilitychange-based mobile WebSocket reconnection.
+              cp /workspace/home-aituber/deploy/k8s/frontend-index-template.html \
+                /workspace/home-aituber/frontend/index.html
+              echo "HomeAITuber frontend template applied"
+
               # ── 5. Patch frontend JS URLs (hardcoded ws/http) ──
               # Replace ws://127.0.0.1:PORT with ws://<service>:PORT
               # and http://127.0.0.1:PORT with http://<service>:PORT
@@ -170,6 +193,35 @@ spec:
                 -exec sed -i 's|ws://127.0.0.1:12393|ws://0.0.0.0:12393|g' {} + 2>/dev/null || true
               find /workspace/home-aituber/frontend -name 'main-*.js' \
                 -exec sed -i 's|http://127.0.0.1:12393|http://0.0.0.0:12393|g' {} + 2>/dev/null || true
+
+              # ── 5b. Inject dynamic WebSocket/Base URL via window.location ──
+              # Override the hardcoded ws://0.0.0.0:12393 defaults with the
+              # actual origin the browser is using (Tailscale IP, NodePort, etc.)
+              if [ -f /workspace/home-aituber/frontend/index.html ]; then
+                INJECT='<script>localStorage.removeItem("modelInfo");localStorage.setItem("wsUrl",JSON.stringify("ws://"+location.host+"/client-ws"));localStorage.setItem("baseUrl",JSON.stringify(location.origin))</script>'
+                sed -i "s|<script type=\"module\" crossorigin src=\"./assets/main-|${INJECT}<script type=\"module\" crossorigin src=\"./assets/main-|" \
+                  /workspace/home-aituber/frontend/index.html
+                echo "Dynamic WebSocket URL injection applied"
+              fi
+
+              # ── 5c. Fix conversation hang: add 30s timeout + continue on timeout ──
+              # Issue: server waits indefinitely for frontend-playback-complete
+              # and when timeout happens, it returns without sending chain-end.
+              # Fix: add timeout AND change "return" to "pass" so chain-end is sent.
+              sed -i 's|client_uid, "frontend-playback-complete"|client_uid, "frontend-playback-complete", timeout=30|' \
+                /workspace/home-aituber/src/open_llm_vtuber/conversations/conversation_utils.py 2>/dev/null || true
+              # After the timeout, don't return — continue to send chain-end
+              sed -i '/if not response:/{n;n;s/^            return$/            # return commented out - continue to send chain-end/}' \
+                /workspace/home-aituber/src/open_llm_vtuber/conversations/conversation_utils.py 2>/dev/null || true
+              echo "Conversation timeout+continue patched"
+
+              # ── 5d. Set default model globals in main JS ──
+              # Prevents the first LAppLive2DManager.changeScene(0) from
+              # requesting /undefined/undefined.model3.json before the
+              # WebSocket set-model-and-conf message arrives.
+              sed -i 's|let ResourcesPath="",ModelDir=\[\],ModelFileNames=\[\]|let ResourcesPath="/live2d-models/mao_pro/",ModelDir=["runtime"],ModelFileNames=["mao_pro"]|' \
+                /workspace/home-aituber/frontend/assets/main-*.js 2>/dev/null || true
+              echo "Default model globals set"
 
               # ── 6. Live2D model symlinks ──
               mkdir -p /workspace/home-aituber/live2d-models
@@ -216,7 +268,7 @@ spec:
               memory: "2Gi"
               cpu: "500m"
             limits:
-              memory: "8Gi"
+              memory: "16Gi"
               cpu: "2"
       volumes:
         - name: source
