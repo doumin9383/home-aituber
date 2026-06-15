@@ -15,14 +15,14 @@ Design:
 
 import asyncio
 import json
-import logging
+import logging as _logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 import re
 from typing import Callable, Optional
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 # Default radio interval: 10 minutes
 DEFAULT_RADIO_INTERVAL_SECONDS = 600
@@ -353,7 +353,7 @@ if __name__ == "__main__":
     parser.add_argument("--mood", choices=["chaotic", "chill", "brisk", "thoughtful"], help="Mood override")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)
+    _logging.basicConfig(level=_logging.INFO)
     result = asyncio.run(generate_one_segment(mood=args.mood))
     if result:
         print(json.dumps(result, indent=2, ensure_ascii=False))

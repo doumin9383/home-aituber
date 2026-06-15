@@ -20,12 +20,12 @@ Output:
 """
 
 import json
-import logging
+import logging as _logging
 import random
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 # Mood descriptions for prompt injection
