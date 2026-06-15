@@ -163,9 +163,12 @@ spec:
                 git remote set-url origin https://oauth2:***@github.com/doumin9383/home-aituber.git
                 git fetch origin
                 git reset --hard origin/main
+                # Reset submodules too — PVC persists between restarts,
+                # and submodule state accumulates stale init-script patches
+                git submodule update --init --recursive --force
               else
                 cd /workspace
-                git clone https://oauth2:***@github.com/doumin9383/home-aituber.git
+                git clone --recurse-submodules https://oauth2:***@github.com/doumin9383/home-aituber.git
                 cd /workspace/home-aituber
               fi
 
@@ -197,11 +200,16 @@ spec:
               # ── 5b. Inject dynamic WebSocket/Base URL via window.location ──
               # Override the hardcoded ws://0.0.0.0:12393 defaults with the
               # actual origin the browser is using (Tailscale IP, NodePort, etc.)
+              # Skip if template (step 4.5) already includes this injection.
               if [ -f /workspace/home-aituber/frontend/index.html ]; then
-                INJECT='<script>localStorage.removeItem("modelInfo");localStorage.setItem("wsUrl",JSON.stringify("ws://"+location.host+"/client-ws"));localStorage.setItem("baseUrl",JSON.stringify(location.origin))</script>'
-                sed -i "s|<script type=\"module\" crossorigin src=\"./assets/main-|${INJECT}<script type=\"module\" crossorigin src=\"./assets/main-|" \
-                  /workspace/home-aituber/frontend/index.html
-                echo "Dynamic WebSocket URL injection applied"
+                if grep -q 'HomeAITuber' /workspace/home-aituber/frontend/index.html 2>/dev/null; then
+                  echo "Template already applied, skipping dynamic URL injection"
+                else
+                  INJECT='<script>localStorage.removeItem("modelInfo");localStorage.setItem("wsUrl",JSON.stringify("ws://"+location.host+"/client-ws"));localStorage.setItem("baseUrl",JSON.stringify(location.origin))</script>'
+                  sed -i "s|<script type=\"module\" crossorigin src=\"./assets/main-|${INJECT}<script type=\"module\" crossorigin src=\"./assets/main-|" \
+                    /workspace/home-aituber/frontend/index.html
+                  echo "Dynamic WebSocket URL injection applied"
+                fi
               fi
 
               # ── 5c. Fix conversation hang: add 30s timeout + continue on timeout ──
