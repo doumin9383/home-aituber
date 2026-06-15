@@ -70,17 +70,23 @@
         function _setLive2DExpression(mood) {
           try {
             const model = _getLive2DModel();
-            if (!model || !model.setExpression) return;
-            const exprMap = {
-              chaotic: ['joy', 'smirk', 'surprise'],
-              chill: ['neutral'],
-              brisk: ['joy'],
-              thoughtful: ['neutral', 'sadness'],
+            if (!model || !model.setExpression || !model._modelSetting) return;
+
+            // mao_pro expression name mapping (emotionMap indices → exp names)
+            // neutral=0, fear/sadness=1, anger/disgust=2, joy/smirk/surprise=3
+            const moodExprIdx = {
+              chaotic: [3, 3, 3],        // joy/smirk/surprise → exp_04
+              chill: [0],                 // neutral → exp_01
+              brisk: [3],                 // joy → exp_04
+              thoughtful: [0, 1],         // neutral or sadness → exp_01 or exp_02
             };
-            const choices = exprMap[mood] || ['neutral'];
-            const expr = choices[Math.floor(Math.random() * choices.length)];
-            console.log('[HA Live2D] Expression:', expr, 'from mood:', mood);
-            model.setExpression(expr);
+            const choices = moodExprIdx[mood] || [0];
+            const idx = choices[Math.floor(Math.random() * choices.length)];
+            const name = model._modelSetting.getExpressionName(idx);
+            if (!name) return;
+
+            console.log('[HA Live2D] Expression:', name, '(idx', idx, ') from mood:', mood);
+            model.setExpression(name);
           } catch(e) { console.warn('[HA Live2D] Expression failed:', e); }
         }
 
