@@ -9,61 +9,54 @@
     <script type="module" crossorigin src="./assets/main-nu7uwxNJ.js"></script>
     <script>
       // ═══════════════════════════════════════════════════════════
-      //  HomeAITuber Control Panel v4 — mode/language switching
+      //  HomeAITuber Ribbon v1 — top bar, no bottom overlay
       // ═══════════════════════════════════════════════════════════
       (function() {
         // ── state ──
         let graphicsEnabled = true;
         let radioWs = null;
         let _radioReconnectDelay = 1000;
-        let panelOpen = true;
+        let dropdownOpen = null; // 'lang' | 'mood' | 'history' | null
         let recentSegments = [];
         const MAX_RECENT = 5;
 
-        // Mode & Language (synced with backend)
         let currentMode = localStorage.getItem('ha-mode') || 'radio';
         let currentLanguage = localStorage.getItem('ha-language') || 'en-jp';
+        let currentMood = localStorage.getItem('ha-mood') || '';
 
         const MODES = [
-          { id: 'chat',       label: '💬 Chat',       desc: 'チャット' },
-          { id: 'radio',      label: '📻 Radio',      desc: 'ラジオ' },
-          { id: 'radio-chat', label: '🎙️ Radio+Chat', desc: 'ラジオ+チャット' },
+          { id: 'chat',       label: '💬 Chat' },
+          { id: 'radio',      label: '📻 Radio' },
+          { id: 'radio-chat', label: '🎙️ Radio+Chat' },
         ];
         const LANGS = [
           { id: 'en',         label: '🇬🇧 EN',       desc: '英語のみ' },
           { id: 'jp',         label: '🇯🇵 JP',       desc: '日本語のみ' },
           { id: 'en-jp',      label: '🔁 EN→JP',   desc: '英→日' },
-          { id: 'en-jp-note', label: '📖 EN→JP→解', desc: '解説付き' },
+          { id: 'en-jp-note', label: '📖 EN→JP→解説', desc: '解説付き' },
           { id: 'mixed',      label: '🎲 Mix',       desc: '混合' },
         ];
+        const MOODS = [
+          { id: '',          label: 'auto',        emoji: '🎭' },
+          { id: 'chaotic',   label: 'chaotic',     emoji: '🤪' },
+          { id: 'chill',     label: 'chill',       emoji: '😌' },
+          { id: 'brisk',     label: 'brisk',       emoji: '⚡' },
+          { id: 'thoughtful',label: 'thoughtful',  emoji: '🤔' },
+        ];
 
-        function persistState() {
+        function persist() {
           localStorage.setItem('ha-mode', currentMode);
           localStorage.setItem('ha-language', currentLanguage);
+          localStorage.setItem('ha-mood', currentMood);
         }
 
-        // ── Push chat input above the control panel ──
-        // React app uses height:100% internally; body padding is ignored.
-        // Instead, inject/update a CSS rule targeting the chat message input directly.
-        const PANEL_HANDLE_HEIGHT = 44;
-        function _ensureMarginStyle() {
-          if (document.getElementById('ha-root-margin')) return;
+        // ── CSS injection for top spacing ──
+        function ensureTopMargin() {
+          if (document.getElementById('ha-top-margin')) return;
           const s = document.createElement('style');
-          s.id = 'ha-root-margin';
+          s.id = 'ha-top-margin';
+          s.textContent = 'body { padding-top: 36px !important; }';
           document.head.appendChild(s);
-        }
-        function updateRootMargin() {
-          _ensureMarginStyle();
-          const styleEl = document.getElementById('ha-root-margin');
-          let margin;
-          if (panelOpen) {
-            const panel = document.getElementById('ha-panel-container');
-            const h = panel ? panel.getBoundingClientRect().height : 300;
-            margin = Math.ceil(h);
-          } else {
-            margin = PANEL_HANDLE_HEIGHT;
-          }
-          styleEl.textContent = `.cs-message-input { margin-bottom: ${margin}px !important; transition: margin-bottom 0.25s ease; }`;
         }
 
         // ── Live2D visibility ──
@@ -77,8 +70,9 @@
           });
           const btn = document.getElementById('ha-gfx-btn');
           if (btn) {
-            btn.textContent = visible ? '🖼️ ON' : '🎧 OFF';
-            btn.style.background = visible ? '#4ecca3' : '#ff6b6b';
+            btn.textContent = visible ? '🖼️' : '🎧';
+            btn.style.background = visible ? 'rgba(78,204,163,0.25)' : 'rgba(255,107,107,0.25)';
+            btn.style.color = visible ? '#4ecca3' : '#ff6b6b';
           }
         }
 
@@ -89,10 +83,8 @@
           try {
             radioWs = new WebSocket(wsUrl);
             radioWs.onopen = () => {
-              console.log('[HA Radio] Connected');
               _radioReconnectDelay = 1000;
               updateStatus('connected');
-              // Server sends state-sync on connect — we'll pick it up in onmessage
             };
             radioWs.onmessage = (event) => {
               try {
@@ -103,28 +95,13 @@
                 } else if (msg.type === 'audio' && msg.audio) {
                   playRadioAudio(msg);
                 } else if (msg.type === 'state-sync') {
-                  // Sync mode/language from server (or another client)
-                  if (msg.mode && msg.mode !== currentMode) {
-                    currentMode = msg.mode;
-                    persistState();
-                    updateModeButtons();
-                  }
-                  if (msg.language && msg.language !== currentLanguage) {
-                    currentLanguage = msg.language;
-                    persistState();
-                    updateLanguageButtons();
-                  }
+                  if (msg.mode) { currentMode = msg.mode; persist(); updateUI(); }
+                  if (msg.language) { currentLanguage = msg.language; persist(); updateUI(); }
                 } else if (msg.type === 'mode-changed') {
-                  currentMode = msg.mode;
-                  persistState();
-                  updateModeButtons();
+                  currentMode = msg.mode; persist(); updateUI();
                 } else if (msg.type === 'language-changed') {
-                  currentLanguage = msg.language;
-                  persistState();
-                  updateLanguageButtons();
-                } else if (msg.type === 'pong') {
-                  // keepalive
-                }
+                  currentLanguage = msg.language; persist(); updateUI();
+                } else if (msg.type === 'pong') {}
               } catch(e) {}
             };
             radioWs.onclose = () => {
@@ -140,85 +117,97 @@
           }
         }
 
-        function sendRadioCommand(cmd) {
+        function sendCmd(cmd) {
           if (radioWs && radioWs.readyState === WebSocket.OPEN) {
             radioWs.send(JSON.stringify(cmd));
           }
         }
 
-        function triggerRadio(mood) {
-          sendRadioCommand({ type: 'request-radio', mood: mood || null });
-          // Flash the button
-          const btn = document.getElementById('ha-radio-btn');
-          if (btn) {
-            btn.style.transform = 'scale(0.92)';
-            setTimeout(() => { btn.style.transform = ''; }, 150);
-          }
+        function fireRadio() {
+          sendCmd({ type: 'request-radio', mood: currentMood || null });
+          const btn = document.getElementById('ha-fire-btn');
+          if (btn) { btn.style.transform = 'scale(0.9)'; setTimeout(() => btn.style.transform = '', 150); }
         }
 
         function setMode(mode) {
           if (mode === currentMode) return;
-          currentMode = mode;
-          persistState();
-          updateModeButtons();
-          sendRadioCommand({ type: 'set-mode', mode: mode });
+          currentMode = mode; persist(); updateUI();
+          sendCmd({ type: 'set-mode', mode });
         }
 
         function setLanguage(lang) {
           if (lang === currentLanguage) return;
-          currentLanguage = lang;
-          persistState();
-          updateLanguageButtons();
-          sendRadioCommand({ type: 'set-language', language: lang });
+          currentLanguage = lang; persist(); updateUI();
+          sendCmd({ type: 'set-language', language: lang });
         }
 
-        function updateModeButtons() {
-          document.querySelectorAll('#ha-mode-row .ha-btn-sm').forEach(btn => {
-            const active = btn.dataset.mode === currentMode;
-            btn.classList.toggle('ha-btn-active', active);
+        function setMood(mood) {
+          currentMood = mood; persist(); updateUI();
+        }
+
+        function updateUI() {
+          // Mode tabs
+          document.querySelectorAll('#ha-mode-tabs .ha-rb-tab').forEach(b => {
+            b.classList.toggle('active', b.dataset.mode === currentMode);
           });
+          // Language label
+          const langBtn = document.getElementById('ha-lang-btn');
+          if (langBtn) {
+            const l = LANGS.find(x => x.id === currentLanguage) || LANGS[2];
+            langBtn.textContent = l.label;
+          }
+          // Mood label
+          const moodBtn = document.getElementById('ha-mood-btn');
+          if (moodBtn) {
+            const m = MOODS.find(x => x.id === currentMood) || MOODS[0];
+            moodBtn.textContent = m.emoji + ' ' + m.label;
+          }
+          // Status
+          const stat = document.getElementById('ha-status-dot');
+          if (stat) stat.className = 'ha-rb-dot ' + (_statusState || 'error');
         }
 
-        function updateLanguageButtons() {
-          document.querySelectorAll('#ha-lang-row .ha-btn-sm').forEach(btn => {
-            const active = btn.dataset.lang === currentLanguage;
-            btn.classList.toggle('ha-btn-active', active);
-          });
-        }
-
+        let _statusState = 'error';
         function updateStatus(state) {
-          const el = document.getElementById('ha-status');
-          if (!el) return;
-          const map = {
-            connected: ['●', '#4ecca3', '接続中'],
-            reconnecting: ['◐', '#ffd93d', '再接続中...'],
-            error: ['○', '#ff6b6b', '未接続'],
-          };
-          const [dot, color, text] = map[state] || map.error;
-          el.innerHTML = `<span style="color:${color}">${dot}</span> ${text}`;
+          _statusState = state;
+          const dot = document.getElementById('ha-status-dot');
+          if (dot) dot.className = 'ha-rb-dot ' + state;
         }
 
-        // ── Segment display ──
+        function toggleDropdown(id) {
+          if (dropdownOpen === id) { closeDropdowns(); return; }
+          closeDropdowns();
+          dropdownOpen = id;
+          const dd = document.getElementById('ha-dd-' + id);
+          if (dd) dd.style.display = 'block';
+        }
+
+        function closeDropdowns() {
+          dropdownOpen = null;
+          document.querySelectorAll('.ha-rb-dropdown').forEach(d => d.style.display = 'none');
+        }
+
+        // ── Segments ──
         function addRecentSegment(seg) {
           recentSegments.unshift(seg);
           if (recentSegments.length > MAX_RECENT) recentSegments.pop();
-          renderRecentList();
+          renderHistoryDD();
         }
 
-        function renderRecentList() {
-          const list = document.getElementById('ha-recent-list');
+        function renderHistoryDD() {
+          const list = document.getElementById('ha-history-list');
           if (!list) return;
           if (recentSegments.length === 0) {
-            list.innerHTML = '<div style="color:#666;font-size:11px;padding:8px;">まだラジオはありません。📻ボタンで発火！</div>';
+            list.innerHTML = '<div style="color:#666;font-size:11px;padding:8px;">まだありません</div>';
             return;
           }
-          list.innerHTML = recentSegments.map((seg, i) => `
-            <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);${i===0?'background:rgba(78,204,163,0.08);border-radius:4px;padding:6px 6px;':''}">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-                <span style="color:#4ecca3;font-size:11px;font-weight:600;">${esc(seg.en||'').substring(0,60)}${(seg.en||'').length>60?'…':''}</span>
+          list.innerHTML = recentSegments.map(seg => `
+            <div style="padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);">
+              <div style="color:#4ecca3;font-size:11px;">${esc(seg.en||'').substring(0,50)}${(seg.en||'').length>50?'…':''}</div>
+              <div style="color:#ffd93d;font-size:10px;">${esc(seg.jp||'').substring(0,60)}</div>
+              <div style="display:flex;justify-content:space-between;margin-top:2px;">
                 <span style="color:#666;font-size:9px;">${seg.mood||'?'}</span>
               </div>
-              <div style="color:#ffd93d;font-size:10px;">${esc(seg.jp||'').substring(0,80)}</div>
             </div>
           `).join('');
         }
@@ -226,31 +215,25 @@
         function showRadioOverlay(seg) {
           const old = document.getElementById('ha-radio-overlay');
           if (old) old.remove();
-
           const moodColors = { chaotic: '#ff6b6b', chill: '#a8d8ea', brisk: '#4ecca3', thoughtful: '#ffd93d' };
           const mc = moodColors[seg.mood] || '#4ecca3';
-
           const overlay = document.createElement('div');
           overlay.id = 'ha-radio-overlay';
           overlay.innerHTML = `
-            <div style="background:#16213e;border:2px solid ${mc};border-radius:12px;padding:14px 18px;max-width:92vw;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,0.6);">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <span style="color:${mc};font-weight:700;font-size:11px;">📻 Radio · ${seg.mood||'brisk'}</span>
-                <span style="color:#888;font-size:10px;">${new Date().toLocaleTimeString()}</span>
+            <div style="background:#16213e;border:2px solid ${mc};border-radius:12px;padding:12px 16px;max-width:92vw;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,0.6);">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span style="color:${mc};font-weight:700;font-size:10px;">📻 ${seg.mood||'brisk'}</span>
+                <span style="color:#888;font-size:9px;">${new Date().toLocaleTimeString()}</span>
               </div>
-              <div style="color:#4ecca3;font-size:14px;margin:3px 0;line-height:1.4;">${esc(seg.en||'')}</div>
-              <div style="color:#ffd93d;font-size:13px;margin:3px 0;line-height:1.4;">${esc(seg.jp||'')}</div>
-              <div style="color:#a8d8ea;font-size:12px;margin:3px 0;font-style:italic;">${esc(seg.en_repeat||'')}</div>
-              ${seg.phrase ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #0f3460;color:#ff6b9d;font-size:12px;">💡 ${esc(seg.phrase)} — ${esc(seg.note||'')}</div>` : ''}
+              <div style="color:#4ecca3;font-size:13px;line-height:1.4;">${esc(seg.en||'')}</div>
+              <div style="color:#ffd93d;font-size:12px;line-height:1.4;">${esc(seg.jp||'')}</div>
+              <div style="color:#a8d8ea;font-size:11px;font-style:italic;">${esc(seg.en_repeat||'')}</div>
+              ${seg.phrase ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid #0f3460;color:#ff6b9d;font-size:11px;">💡 ${esc(seg.phrase)} — ${esc(seg.note||'')}</div>` : ''}
             </div>
           `;
-          overlay.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);z-index:9998;animation:haFadeIn 0.3s ease;pointer-events:none;width:100%;max-width:500px;';
+          overlay.style.cssText = 'position:fixed;top:50px;left:50%;transform:translateX(-50%);z-index:9998;animation:haFadeIn 0.3s ease;pointer-events:none;width:100%;max-width:500px;';
           document.body.appendChild(overlay);
-          setTimeout(() => {
-            overlay.style.opacity = '0';
-            overlay.style.transition = 'opacity 0.8s';
-            setTimeout(() => overlay.remove(), 800);
-          }, 25000);
+          setTimeout(() => { overlay.style.opacity = '0'; overlay.style.transition = 'opacity 0.8s'; setTimeout(() => overlay.remove(), 800); }, 25000);
         }
 
         function esc(text) {
@@ -260,43 +243,26 @@
           return d.innerHTML;
         }
 
-        // ── Audio playback (queued, sequential) ──
-        let _radioAudioQueue = [];
-        let _radioAudioPlaying = false;
-
+        // ── Audio ──
+        let _radioAudioQueue = [], _radioAudioPlaying = false;
         function playRadioAudio(msg) {
           try {
-            const binaryStr = atob(msg.audio);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-            const blob = new Blob([bytes], { type: 'audio/wav' });
-            const url = URL.createObjectURL(blob);
+            const bytes = new Uint8Array(atob(msg.audio).split('').map(c => c.charCodeAt(0)));
+            const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
             _radioAudioQueue.push(url);
             _playNextInQueue();
-          } catch(e) {
-            console.warn('[HA Radio] Audio decode failed:', e);
-          }
+          } catch(e) { console.warn('[HA] Audio decode:', e); }
         }
-
         function _playNextInQueue() {
           if (_radioAudioPlaying || _radioAudioQueue.length === 0) return;
           _radioAudioPlaying = true;
           const url = _radioAudioQueue.shift();
-          const audio = new Audio(url);
-          audio.play().catch(e => {
-            console.warn('[HA Radio] Audio play failed:', e);
-            URL.revokeObjectURL(url);
-            _radioAudioPlaying = false;
-            _playNextInQueue();
-          });
-          audio.onended = () => {
-            URL.revokeObjectURL(url);
-            _radioAudioPlaying = false;
-            setTimeout(() => _playNextInQueue(), 200);
-          };
+          const a = new Audio(url);
+          a.play().catch(() => { URL.revokeObjectURL(url); _radioAudioPlaying = false; _playNextInQueue(); });
+          a.onended = () => { URL.revokeObjectURL(url); _radioAudioPlaying = false; setTimeout(_playNextInQueue, 200); };
         }
 
-        // ── Chat interception → radio feedback ──
+        // ── Chat interception ──
         function interceptChatWebSocket() {
           const origSend = WebSocket.prototype.send;
           const targetHost = new URL(window.location.origin).host;
@@ -313,280 +279,156 @@
           };
         }
 
-        // ── Tab visibility → reconnect ──
+        // ── Tab visibility ──
         document.addEventListener('visibilitychange', () => {
           if (document.visibilityState !== 'visible') return;
-          const stale = !radioWs || radioWs.readyState === WebSocket.CLOSED || radioWs.readyState === WebSocket.CLOSING;
-          if (stale) {
-            console.log('[HA Radio] Tab visible, reconnecting...');
-            connectRadioWS();
+          if (!radioWs || radioWs.readyState > 1) connectRadioWS();
+        });
+
+        // ── Click outside closes dropdowns ──
+        document.addEventListener('click', (e) => {
+          if (!e.target.closest('.ha-rb-dd-trigger') && !e.target.closest('.ha-rb-dropdown')) {
+            closeDropdowns();
           }
         });
 
-        // ── Resize → update root margin ──
-        window.addEventListener('resize', () => {
-          if (panelOpen) updateRootMargin();
-        });
+        // ── Build ribbon ──
+        function buildRibbon() {
+          if (document.getElementById('ha-ribbon')) return;
+          ensureTopMargin();
 
-        // ── Build control panel ──
-        function buildPanel() {
-          if (document.getElementById('ha-panel')) return;
-
-          const panel = document.createElement('div');
-          panel.id = 'ha-panel';
-          panel.innerHTML = `
+          const ribbon = document.createElement('div');
+          ribbon.id = 'ha-ribbon';
+          ribbon.innerHTML = `
             <style>
-              @keyframes haFadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
-              #ha-panel { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-              #ha-panel * { box-sizing: border-box; }
-              .ha-panel-container {
-                position: fixed;
-                bottom: 0; left: 0; right: 0;
-                z-index: 10000;
-                background: linear-gradient(180deg, rgba(26,26,46,0.95) 0%, rgba(15,15,30,0.98) 100%);
-                backdrop-filter: blur(12px);
-                -webkit-backdrop-filter: blur(12px);
-                border-top: 2px solid #4ecca3;
-                border-radius: 16px 16px 0 0;
-                transition: transform 0.25s ease;
-                max-height: 55vh;
-                overflow-y: auto;
-                box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
+              @keyframes haFadeIn { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
+              #ha-ribbon { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+              #ha-ribbon * { box-sizing: border-box; }
+              .ha-rb-bar {
+                position: fixed; top: 0; left: 0; right: 0; z-index: 10000;
+                height: 36px;
+                background: rgba(15,15,30,0.96);
+                backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+                border-bottom: 1px solid rgba(78,204,163,0.3);
+                display: flex; align-items: center;
+                padding: 0 8px; gap: 4px;
+                box-shadow: 0 1px 12px rgba(0,0,0,0.4);
               }
-              .ha-panel-container.collapsed { transform: translateY(calc(100% - 44px)); }
-              .ha-panel-handle {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                padding: 8px 16px;
-                cursor: pointer;
-                user-select: none;
-                -webkit-tap-highlight-color: transparent;
-                min-height: 44px;
+              .ha-rb-tabs { display: flex; gap: 2px; margin-right: auto; }
+              .ha-rb-tab {
+                padding: 4px 10px; border: none; border-radius: 6px;
+                background: transparent; color: #999;
+                font-size: 11px; font-weight: 600; cursor: pointer;
+                transition: all 0.15s; white-space: nowrap;
               }
-              .ha-panel-handle:active { background: rgba(255,255,255,0.03); }
-              .ha-panel-title {
-                color: #4ecca3;
-                font-weight: 700;
-                font-size: 13px;
-                letter-spacing: 0.5px;
+              .ha-rb-tab:active { transform: scale(0.95); }
+              .ha-rb-tab.active { background: rgba(78,204,163,0.2); color: #4ecca3; }
+              .ha-rb-btn {
+                padding: 3px 8px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+                background: rgba(255,255,255,0.04); color: #ccc;
+                font-size: 10px; font-weight: 600; cursor: pointer;
+                transition: all 0.15s; white-space: nowrap;
+                min-width: 32px; text-align: center;
               }
-              .ha-panel-status {
-                color: #888;
-                font-size: 11px;
-                margin-right: 8px;
+              .ha-rb-btn:active { transform: scale(0.95); }
+              .ha-rb-btn.fire { background: rgba(255,107,157,0.15); border-color: rgba(255,107,157,0.3); color: #ff6b9d; font-size: 15px; padding: 1px 10px; }
+              .ha-rb-btn.gfx { font-size: 14px; padding: 2px 8px; }
+              .ha-rb-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 2px; flex-shrink: 0; }
+              .ha-rb-dot.connected { background: #4ecca3; }
+              .ha-rb-dot.reconnecting { background: #ffd93d; }
+              .ha-rb-dot.error { background: #ff6b6b; }
+              .ha-rb-dropdown {
+                display: none; position: fixed; top: 36px;
+                z-index: 10001;
+                background: rgba(15,15,30,0.98);
+                backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+                border: 1px solid rgba(78,204,163,0.2);
+                border-radius: 0 0 8px 8px;
+                padding: 6px; min-width: 140px;
+                box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+                max-height: 70vh; overflow-y: auto;
               }
-              .ha-panel-chevron {
-                color: #888;
-                font-size: 12px;
-                transition: transform 0.25s;
-              }
-              .collapsed .ha-panel-chevron { transform: rotate(180deg); }
-              .ha-panel-body {
-                padding: 0 12px 16px;
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-              }
-              .ha-row {
-                display: flex;
-                gap: 6px;
-                align-items: center;
-                flex-wrap: wrap;
-              }
-              .ha-btn {
-                padding: 10px 16px;
-                border: none;
-                border-radius: 10px;
-                font-weight: 600;
-                font-size: 13px;
-                cursor: pointer;
-                transition: all 0.15s;
-                -webkit-tap-highlight-color: transparent;
-                touch-action: manipulation;
-                user-select: none;
+              .ha-rb-dd-item {
+                padding: 6px 10px; border-radius: 6px; cursor: pointer;
+                color: #ccc; font-size: 11px; transition: background 0.1s;
                 white-space: nowrap;
               }
-              .ha-btn:active { transform: scale(0.95); }
-              .ha-btn-sm {
-                padding: 7px 10px;
-                border: 1px solid rgba(255,255,255,0.12);
-                border-radius: 8px;
-                background: rgba(255,255,255,0.05);
-                color: #999;
-                font-size: 11px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.15s;
-                white-space: nowrap;
-                flex: 1;
-                min-width: 0;
-                text-align: center;
-              }
-              .ha-btn-sm:active { transform: scale(0.95); }
-              .ha-btn-active {
-                background: rgba(78,204,163,0.20);
-                border-color: #4ecca3;
-                color: #4ecca3;
-              }
-              .ha-btn-gfx { background: #4ecca3; color: #1a1a2e; flex: 1; min-width: 90px; }
-              .ha-btn-radio { background: #ff6b9d; color: #fff; flex: 2; min-width: 120px; font-size: 15px; }
-              .ha-btn-mood {
-                background: rgba(255,255,255,0.08);
-                color: #ccc;
-                font-size: 11px;
-                padding: 7px 12px;
-                border-radius: 8px;
-                flex: 1;
-                min-width: 70px;
-                text-align: center;
-                border: 1px solid transparent;
-                cursor: pointer;
-                transition: all 0.15s;
-              }
-              .ha-btn-mood.active { background: rgba(78,204,163,0.25); color: #4ecca3; border: 1px solid #4ecca3; }
-              .ha-label {
-                color: #888;
-                font-size: 10px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                margin-bottom: 2px;
-              }
-              .ha-recent {
-                max-height: 140px;
-                overflow-y: auto;
-                font-size: 11px;
-                -webkit-overflow-scrolling: touch;
-              }
-              /* mobile tweaks */
+              .ha-rb-dd-item:hover { background: rgba(78,204,163,0.12); }
+              .ha-rb-dd-item.active { color: #4ecca3; background: rgba(78,204,163,0.18); }
               @media (max-width: 400px) {
-                .ha-btn { padding: 8px 12px; font-size: 12px; }
-                .ha-btn-radio { font-size: 14px; }
-                .ha-btn-mood { padding: 6px 10px; font-size: 10px; }
-                .ha-btn-sm { padding: 6px 8px; font-size: 10px; }
+                .ha-rb-tab { padding: 4px 6px; font-size: 10px; }
+                .ha-rb-btn { padding: 2px 6px; font-size: 9px; }
+                .ha-rb-btn.fire { font-size: 13px; padding: 1px 8px; }
               }
             </style>
-            <div class="ha-panel-container" id="ha-panel-container">
-              <div class="ha-panel-handle" id="ha-panel-handle">
-                <span class="ha-panel-title">🎛️ HomeAITuber</span>
-                <span class="ha-panel-status" id="ha-status">○ 未接続</span>
-                <span class="ha-panel-chevron">▼</span>
-              </div>
-              <div class="ha-panel-body">
-                <div>
-                  <div class="ha-label">📋 Mode</div>
-                  <div class="ha-row" id="ha-mode-row"></div>
-                </div>
-                <div>
-                  <div class="ha-label">🌐 Language</div>
-                  <div class="ha-row" id="ha-lang-row"></div>
-                </div>
-                <div>
-                  <div class="ha-label">🎭 Mood</div>
-                  <div class="ha-row" id="ha-mood-row">
-                    <button class="ha-btn ha-btn-mood active" data-mood=""  onclick="window.__ha_setMood(this)">auto</button>
-                    <button class="ha-btn ha-btn-mood" data-mood="chaotic" onclick="window.__ha_setMood(this)">🤪 chaotic</button>
-                    <button class="ha-btn ha-btn-mood" data-mood="chill" onclick="window.__ha_setMood(this)">😌 chill</button>
-                    <button class="ha-btn ha-btn-mood" data-mood="brisk" onclick="window.__ha_setMood(this)">⚡ brisk</button>
-                    <button class="ha-btn ha-btn-mood" data-mood="thoughtful" onclick="window.__ha_setMood(this)">🤔 thoughtful</button>
-                  </div>
-                </div>
-                <div class="ha-row">
-                  <button class="ha-btn ha-btn-gfx" id="ha-gfx-btn" onclick="window.__ha_toggleGfx()">🖼️ ON</button>
-                  <button class="ha-btn ha-btn-radio" id="ha-radio-btn" onclick="window.__ha_fireRadio()">📻 ラジオ発火</button>
-                </div>
-                <div>
-                  <div class="ha-label">📜 最近のラジオ</div>
-                  <div class="ha-recent" id="ha-recent-list">
-                    <div style="color:#666;font-size:11px;padding:8px;">接続中...</div>
-                  </div>
-                </div>
+            <div class="ha-rb-bar" id="ha-rb-bar">
+              <span class="ha-rb-dot error" id="ha-status-dot" title="未接続"></span>
+              <div class="ha-rb-tabs" id="ha-mode-tabs"></div>
+              <button class="ha-rb-btn ha-rb-dd-trigger" id="ha-lang-btn" onclick="event.stopPropagation();toggleDropdown('lang')">🔁 EN→JP</button>
+              <button class="ha-rb-btn ha-rb-dd-trigger" id="ha-mood-btn" onclick="event.stopPropagation();toggleDropdown('mood')">🎭 auto</button>
+              <button class="ha-rb-btn gfx" id="ha-gfx-btn" onclick="event.stopPropagation();setLive2DVisible(!graphicsEnabled)">🖼️</button>
+              <button class="ha-rb-btn fire" id="ha-fire-btn" onclick="event.stopPropagation();fireRadio()">📻</button>
+              <button class="ha-rb-btn ha-rb-dd-trigger" onclick="event.stopPropagation();toggleDropdown('history')" title="履歴">📜</button>
+            </div>
+            <!-- Language dropdown -->
+            <div class="ha-rb-dropdown" id="ha-dd-lang" style="right:200px;"></div>
+            <!-- Mood dropdown -->
+            <div class="ha-rb-dropdown" id="ha-dd-mood" style="right:140px;"></div>
+            <!-- History dropdown -->
+            <div class="ha-rb-dropdown" id="ha-dd-history" style="right:40px;min-width:220px;">
+              <div id="ha-history-list" style="font-size:11px;">
+                <div style="color:#666;font-size:11px;padding:8px;">まだありません</div>
               </div>
             </div>
           `;
-          document.body.appendChild(panel);
+          document.body.appendChild(ribbon);
 
-          // Build mode buttons
-          const modeRow = document.getElementById('ha-mode-row');
+          // Build mode tabs
+          const tabs = document.getElementById('ha-mode-tabs');
           MODES.forEach(m => {
-            const btn = document.createElement('button');
-            btn.className = 'ha-btn-sm';
-            btn.dataset.mode = m.id;
-            btn.textContent = m.label;
-            btn.title = m.desc;
-            btn.addEventListener('click', () => setMode(m.id));
-            modeRow.appendChild(btn);
+            const b = document.createElement('button');
+            b.className = 'ha-rb-tab'; b.dataset.mode = m.id; b.textContent = m.label;
+            b.title = m.id === 'chat' ? 'チャット' : m.id === 'radio' ? 'ラジオ' : 'ラジオ+チャット';
+            b.addEventListener('click', (e) => { e.stopPropagation(); setMode(m.id); });
+            tabs.appendChild(b);
           });
 
-          // Build language buttons
-          const langRow = document.getElementById('ha-lang-row');
+          // Build language dropdown
+          const langDD = document.getElementById('ha-dd-lang');
           LANGS.forEach(l => {
-            const btn = document.createElement('button');
-            btn.className = 'ha-btn-sm';
-            btn.dataset.lang = l.id;
-            btn.textContent = l.label;
-            btn.title = l.desc;
-            btn.addEventListener('click', () => setLanguage(l.id));
-            langRow.appendChild(btn);
+            const div = document.createElement('div');
+            div.className = 'ha-rb-dd-item'; div.textContent = l.label + ' ' + l.desc;
+            div.addEventListener('click', (e) => { e.stopPropagation(); setLanguage(l.id); closeDropdowns(); });
+            langDD.appendChild(div);
           });
 
-          // Apply initial state
-          updateModeButtons();
-          updateLanguageButtons();
-
-          // Panel collapse/expand
-          document.getElementById('ha-panel-handle').addEventListener('click', () => {
-            panelOpen = !panelOpen;
-            const container = document.getElementById('ha-panel-container');
-            if (panelOpen) container.classList.remove('collapsed');
-            else container.classList.add('collapsed');
-            // Wait for transition then update margin
-            setTimeout(updateRootMargin, 50);
+          // Build mood dropdown
+          const moodDD = document.getElementById('ha-dd-mood');
+          MOODS.forEach(m => {
+            const div = document.createElement('div');
+            div.className = 'ha-rb-dd-item'; div.textContent = m.emoji + ' ' + m.label;
+            div.addEventListener('click', (e) => { e.stopPropagation(); setMood(m.id); closeDropdowns(); });
+            moodDD.appendChild(div);
           });
 
-          // Global handlers
-          window.__ha_toggleGfx = () => setLive2DVisible(!graphicsEnabled);
-          window.__ha_setMood = (btn) => {
-            document.querySelectorAll('#ha-mood-row .ha-btn-mood').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-          };
-          window.__ha_fireRadio = () => {
-            const active = document.querySelector('#ha-mood-row .ha-btn-mood.active');
-            const mood = active ? active.dataset.mood : null;
-            triggerRadio(mood || undefined);
-          };
-
-          // Set initial root margin
-          updateRootMargin();
-
-          // Collapse by default on mobile (portrait)
-          if (window.innerWidth < 600 && window.innerHeight < 800) {
-            panelOpen = false;
-            document.getElementById('ha-panel-container').classList.add('collapsed');
-            updateRootMargin();
-          }
+          updateUI();
         }
 
         // ── Init ──
         function init() {
-          buildPanel();
+          buildRibbon();
           connectRadioWS();
           interceptChatWebSocket();
         }
 
-        // Go immediately — don't wait for canvas
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', () => setTimeout(init, 500));
         } else {
           setTimeout(init, 500);
         }
 
-        // Also try on canvas appearance (for Live2D toggle to work properly)
         const obs = new MutationObserver(() => {
-          if (document.querySelector('canvas')) {
-            // Live2D loaded — ensure gfx state is correct
-            if (!graphicsEnabled) setLive2DVisible(false);
-          }
+          if (document.querySelector('canvas') && !graphicsEnabled) setLive2DVisible(false);
         });
         obs.observe(document.body, { childList: true, subtree: true });
       })();
