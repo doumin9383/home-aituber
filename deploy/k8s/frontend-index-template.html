@@ -2,45 +2,41 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
     <title>HomeAITuber</title>
     <link rel="stylesheet" crossorigin href="./assets/main-QEkl09-0.css">
     <script>localStorage.removeItem("modelInfo");localStorage.setItem("wsUrl",JSON.stringify("ws://"+location.host+"/client-ws"));localStorage.setItem("baseUrl",JSON.stringify(location.origin))</script>
     <script type="module" crossorigin src="./assets/main-nu7uwxNJ.js"></script>
     <script>
-      // ── HomeAITuber customization ──
+      // ═══════════════════════════════════════════════════════════
+      //  HomeAITuber Control Panel v2 — mobile-first
+      // ═══════════════════════════════════════════════════════════
       (function() {
-        // Graphics ON/OFF toggle state
+        // ── state ──
         let graphicsEnabled = true;
-
-        function hideLive2D(hide) {
-          const canvases = document.querySelectorAll('canvas');
-          const containers = document.querySelectorAll('[class*="live2d"], [id*="live2d"], [class*="Live2D"]');
-          canvases.forEach(el => { el.style.visibility = hide ? 'hidden' : 'visible'; });
-          containers.forEach(el => { el.style.display = hide ? 'none' : ''; });
-        }
-
-        function addToggleButton() {
-          if (document.getElementById('ha-graphics-toggle')) return;
-          const btn = document.createElement('button');
-          btn.id = 'ha-graphics-toggle';
-          btn.textContent = '🖼️ Graphics ON';
-          btn.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:9999;padding:8px 16px;border:none;border-radius:8px;background:#4ecca3;color:#1a1a2e;font-weight:600;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);transition:all 0.2s;';
-          btn.onmouseenter = () => { btn.style.opacity = '0.9'; };
-          btn.onmouseleave = () => { btn.style.opacity = '1'; };
-          btn.onclick = () => {
-            graphicsEnabled = !graphicsEnabled;
-            hideLive2D(!graphicsEnabled);
-            btn.textContent = graphicsEnabled ? '🖼️ Graphics ON' : '🎧 Graphics OFF (battery)';
-            btn.style.background = graphicsEnabled ? '#4ecca3' : '#ff6b6b';
-          };
-          document.body.appendChild(btn);
-        }
-
-        // ── Radio segment display + chat feedback ──
         let radioWs = null;
-        let interceptOrigWs = true;
         let _radioReconnectDelay = 1000;
+        let panelOpen = true;
+        let recentSegments = [];
+        const MAX_RECENT = 5;
 
+        // ── Live2D visibility ──
+        function setLive2DVisible(visible) {
+          graphicsEnabled = visible;
+          document.querySelectorAll('canvas').forEach(el => {
+            el.style.visibility = visible ? 'visible' : 'hidden';
+          });
+          document.querySelectorAll('[class*="live2d"], [id*="live2d"], [class*="Live2D"]').forEach(el => {
+            el.style.display = visible ? '' : 'none';
+          });
+          const btn = document.getElementById('ha-gfx-btn');
+          if (btn) {
+            btn.textContent = visible ? '🖼️ ON' : '🎧 OFF';
+            btn.style.background = visible ? '#4ecca3' : '#ff6b6b';
+          }
+        }
+
+        // ── Radio WS ──
         function connectRadioWS() {
           const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
           const wsUrl = `${proto}//${window.location.host}/radio-ws`;
@@ -49,54 +45,132 @@
             radioWs.onopen = () => {
               console.log('[HA Radio] Connected');
               _radioReconnectDelay = 1000;
+              updateStatus('connected');
             };
             radioWs.onmessage = (event) => {
               try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'radio-segment' && msg.segment) {
-                  showRadioSegment(msg.segment);
+                  addRecentSegment(msg.segment);
+                  showRadioOverlay(msg.segment);
+                } else if (msg.type === 'pong') {
+                  // keepalive
                 }
               } catch(e) {}
             };
             radioWs.onclose = () => {
+              updateStatus('reconnecting');
               const delay = Math.min(_radioReconnectDelay * 2, 30000);
               _radioReconnectDelay = delay;
-              console.log(`[HA Radio] Disconnected, reconnecting in ${delay/1000}s...`);
               setTimeout(connectRadioWS, delay);
             };
-            radioWs.onerror = () => console.warn('[HA Radio] WS error, will retry...');
+            radioWs.onerror = () => updateStatus('error');
           } catch(e) {
+            updateStatus('error');
             setTimeout(connectRadioWS, 30000);
           }
         }
 
-        // Reconnect immediately when the tab becomes visible again (mobile wake-up)
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState !== 'visible') return;
-          const isStale = !radioWs || radioWs.readyState === WebSocket.CLOSED || radioWs.readyState === WebSocket.CLOSING;
-          if (isStale) {
-            console.log('[HA Radio] Tab visible, reconnecting immediately...');
-            connectRadioWS();
+        function sendRadioCommand(cmd) {
+          if (radioWs && radioWs.readyState === WebSocket.OPEN) {
+            radioWs.send(JSON.stringify(cmd));
+          }
+        }
+
+        function triggerRadio(mood) {
+          sendRadioCommand({ type: 'request-radio', mood: mood || null });
+          // Flash the button
+          const btn = document.getElementById('ha-radio-btn');
+          if (btn) {
+            btn.style.transform = 'scale(0.92)';
+            setTimeout(() => { btn.style.transform = ''; }, 150);
+          }
+        }
+
+        function updateStatus(state) {
+          const el = document.getElementById('ha-status');
+          if (!el) return;
+          const map = {
+            connected: ['●', '#4ecca3', 'ラジオ接続中'],
+            reconnecting: ['◐', '#ffd93d', '再接続中...'],
+            error: ['○', '#ff6b6b', '未接続'],
+          };
+          const [dot, color, text] = map[state] || map.error;
+          el.innerHTML = `<span style="color:${color}">${dot}</span> ${text}`;
+        }
+
+        // ── Segment display ──
+        function addRecentSegment(seg) {
+          recentSegments.unshift(seg);
+          if (recentSegments.length > MAX_RECENT) recentSegments.pop();
+          renderRecentList();
+        }
+
+        function renderRecentList() {
+          const list = document.getElementById('ha-recent-list');
+          if (!list) return;
+          if (recentSegments.length === 0) {
+            list.innerHTML = '<div style="color:#666;font-size:11px;padding:8px;">まだラジオはありません。📻ボタンで発火！</div>';
             return;
           }
-          try { radioWs.send(''); } catch (e) { connectRadioWS(); }
-        });
+          list.innerHTML = recentSegments.map((seg, i) => `
+            <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);${i===0?'background:rgba(78,204,163,0.08);border-radius:4px;padding:6px 6px;':''}">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+                <span style="color:#4ecca3;font-size:11px;font-weight:600;">${esc(seg.en||'').substring(0,60)}${(seg.en||'').length>60?'…':''}</span>
+                <span style="color:#666;font-size:9px;">${seg.mood||'?'}</span>
+              </div>
+              <div style="color:#ffd93d;font-size:10px;">${esc(seg.jp||'').substring(0,80)}</div>
+            </div>
+          `).join('');
+        }
 
-        // Intercept the upstream WebSocket to capture chat messages
+        function showRadioOverlay(seg) {
+          const old = document.getElementById('ha-radio-overlay');
+          if (old) old.remove();
+
+          const moodColors = { chaotic: '#ff6b6b', chill: '#a8d8ea', brisk: '#4ecca3', thoughtful: '#ffd93d' };
+          const mc = moodColors[seg.mood] || '#4ecca3';
+
+          const overlay = document.createElement('div');
+          overlay.id = 'ha-radio-overlay';
+          overlay.innerHTML = `
+            <div style="background:#16213e;border:2px solid ${mc};border-radius:12px;padding:14px 18px;max-width:92vw;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,0.6);">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="color:${mc};font-weight:700;font-size:11px;">📻 Radio · ${seg.mood||'brisk'}</span>
+                <span style="color:#888;font-size:10px;">${new Date().toLocaleTimeString()}</span>
+              </div>
+              <div style="color:#4ecca3;font-size:14px;margin:3px 0;line-height:1.4;">${esc(seg.en||'')}</div>
+              <div style="color:#ffd93d;font-size:13px;margin:3px 0;line-height:1.4;">${esc(seg.jp||'')}</div>
+              <div style="color:#a8d8ea;font-size:12px;margin:3px 0;font-style:italic;">${esc(seg.en_repeat||'')}</div>
+              ${seg.phrase ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #0f3460;color:#ff6b9d;font-size:12px;">💡 ${esc(seg.phrase)} — ${esc(seg.note||'')}</div>` : ''}
+            </div>
+          `;
+          overlay.style.cssText = 'position:fixed;bottom:140px;left:50%;transform:translateX(-50%);z-index:9998;animation:haFadeIn 0.3s ease;pointer-events:none;width:100%;max-width:500px;';
+          document.body.appendChild(overlay);
+          setTimeout(() => {
+            overlay.style.opacity = '0';
+            overlay.style.transition = 'opacity 0.8s';
+            setTimeout(() => overlay.remove(), 800);
+          }, 25000);
+        }
+
+        function esc(text) {
+          if (!text) return '';
+          const d = document.createElement('div');
+          d.textContent = text;
+          return d.innerHTML;
+        }
+
+        // ── Chat interception → radio feedback ──
         function interceptChatWebSocket() {
           const origSend = WebSocket.prototype.send;
-          const parsedOrigin = new URL(window.location.origin);
-          const targetHost = parsedOrigin.host;
+          const targetHost = new URL(window.location.origin).host;
           WebSocket.prototype.send = function(data) {
             if (this.url && this.url.includes(targetHost)) {
               try {
                 const msg = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data));
                 if (msg.type === 'text-input' && msg.text && radioWs && radioWs.readyState === WebSocket.OPEN) {
-                  radioWs.send(JSON.stringify({
-                    type: 'comment',
-                    text: msg.text,
-                    source: 'chat',
-                  }));
+                  radioWs.send(JSON.stringify({ type: 'comment', text: msg.text, source: 'chat' }));
                 }
               } catch(e) {}
             }
@@ -104,74 +178,210 @@
           };
         }
 
-        function showRadioSegment(segment) {
-          const old = document.getElementById('ha-radio-overlay');
-          if (old) old.remove();
-
-          const overlay = document.createElement('div');
-          overlay.id = 'ha-radio-overlay';
-
-          const moodColors = { chaotic: '#ff6b6b', chill: '#a8d8ea', brisk: '#4ecca3', thoughtful: '#ffd93d' };
-          const moodColor = moodColors[segment.mood] || '#4ecca3';
-
-          overlay.innerHTML = `
-            <div style="background:#16213e;border:2px solid ${moodColor};border-radius:12px;padding:16px 20px;max-width:600px;margin:0 auto;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <span style="color:${moodColor};font-weight:700;font-size:12px;text-transform:uppercase;">📻 Radio · ${segment.mood || 'brisk'}</span>
-                <span style="color:#888;font-size:11px;">${new Date().toLocaleTimeString()}</span>
-              </div>
-              <div style="color:#4ecca3;font-size:15px;margin:4px 0;">${escapeHtml(segment.en || '')}</div>
-              <div style="color:#ffd93d;font-size:14px;margin:4px 0;">${escapeHtml(segment.jp || '')}</div>
-              <div style="color:#a8d8ea;font-size:13px;margin:4px 0;font-style:italic;">${escapeHtml(segment.en_repeat || '')}</div>
-              ${segment.phrase ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #0f3460;color:#ff6b9d;font-size:13px;">💡 ${escapeHtml(segment.phrase)} — ${escapeHtml(segment.note || '')}</div>` : ''}
-            </div>
-          `;
-          overlay.style.cssText = 'position:fixed;bottom:80px;right:16px;z-index:9998;animation:haFadeIn 0.3s ease;transition:opacity 0.5s;';
-
-          document.body.appendChild(overlay);
-
-          setTimeout(() => {
-            overlay.style.opacity = '0';
-            setTimeout(() => overlay.remove(), 500);
-          }, 30000);
-        }
-
-        function escapeHtml(text) {
-          if (!text) return '';
-          const d = document.createElement('div');
-          d.textContent = text;
-          return d.innerHTML;
-        }
-
-        // Inject CSS animation
-        const style = document.createElement('style');
-        style.textContent = '@keyframes haFadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }';
-        document.head.appendChild(style);
-
-        // Wait for React app to mount then add toggle + radio + chat interceptor
-        let initDone = false;
-        const observer = new MutationObserver(() => {
-          if (!initDone && (document.querySelector('canvas') || document.querySelector('[class*="live2d"]'))) {
-            initDone = true;
-            addToggleButton();
+        // ── Tab visibility → reconnect ──
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState !== 'visible') return;
+          const stale = !radioWs || radioWs.readyState === WebSocket.CLOSED || radioWs.readyState === WebSocket.CLOSING;
+          if (stale) {
+            console.log('[HA Radio] Tab visible, reconnecting...');
             connectRadioWS();
-            interceptChatWebSocket();
-            observer.disconnect();
           }
         });
-        observer.observe(document.body, { childList: true, subtree: true });
 
-        // Fallback
-        document.addEventListener('DOMContentLoaded', () => {
-          setTimeout(() => {
-            if (!initDone) {
-              addToggleButton();
-              connectRadioWS();
-              interceptChatWebSocket();
-              initDone = true;
-            }
-          }, 3000);
+        // ── Build control panel ──
+        function buildPanel() {
+          if (document.getElementById('ha-panel')) return;
+
+          const panel = document.createElement('div');
+          panel.id = 'ha-panel';
+          panel.innerHTML = `
+            <style>
+              @keyframes haFadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+              #ha-panel { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+              #ha-panel * { box-sizing: border-box; }
+              .ha-panel-container {
+                position: fixed;
+                bottom: 0; left: 0; right: 0;
+                z-index: 10000;
+                background: linear-gradient(180deg, rgba(26,26,46,0.95) 0%, rgba(15,15,30,0.98) 100%);
+                backdrop-filter: blur(12px);
+                -webkit-backdrop-filter: blur(12px);
+                border-top: 2px solid #4ecca3;
+                border-radius: 16px 16px 0 0;
+                transition: transform 0.25s ease;
+                max-height: 55vh;
+                overflow-y: auto;
+                box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
+              }
+              .ha-panel-container.collapsed { transform: translateY(calc(100% - 44px)); }
+              .ha-panel-handle {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 8px 16px;
+                cursor: pointer;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+                min-height: 44px;
+              }
+              .ha-panel-handle:active { background: rgba(255,255,255,0.03); }
+              .ha-panel-title {
+                color: #4ecca3;
+                font-weight: 700;
+                font-size: 13px;
+                letter-spacing: 0.5px;
+              }
+              .ha-panel-status {
+                color: #888;
+                font-size: 11px;
+                margin-right: 8px;
+              }
+              .ha-panel-chevron {
+                color: #888;
+                font-size: 12px;
+                transition: transform 0.25s;
+              }
+              .collapsed .ha-panel-chevron { transform: rotate(180deg); }
+              .ha-panel-body {
+                padding: 0 12px 16px;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+              }
+              .ha-row {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                flex-wrap: wrap;
+              }
+              .ha-btn {
+                padding: 10px 16px;
+                border: none;
+                border-radius: 10px;
+                font-weight: 600;
+                font-size: 13px;
+                cursor: pointer;
+                transition: all 0.15s;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: manipulation;
+                user-select: none;
+                white-space: nowrap;
+              }
+              .ha-btn:active { transform: scale(0.95); }
+              .ha-btn-gfx { background: #4ecca3; color: #1a1a2e; flex: 1; min-width: 90px; }
+              .ha-btn-radio { background: #ff6b9d; color: #fff; flex: 2; min-width: 120px; font-size: 15px; }
+              .ha-btn-mood {
+                background: rgba(255,255,255,0.08);
+                color: #ccc;
+                font-size: 11px;
+                padding: 7px 12px;
+                border-radius: 8px;
+                flex: 1;
+                min-width: 70px;
+                text-align: center;
+              }
+              .ha-btn-mood.active { background: rgba(78,204,163,0.25); color: #4ecca3; border: 1px solid #4ecca3; }
+              .ha-label {
+                color: #888;
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                margin-bottom: 2px;
+              }
+              .ha-recent {
+                max-height: 180px;
+                overflow-y: auto;
+                font-size: 11px;
+                -webkit-overflow-scrolling: touch;
+              }
+              /* mobile tweaks */
+              @media (max-width: 400px) {
+                .ha-btn { padding: 8px 12px; font-size: 12px; }
+                .ha-btn-radio { font-size: 14px; }
+                .ha-btn-mood { padding: 6px 10px; font-size: 10px; }
+              }
+            </style>
+            <div class="ha-panel-container" id="ha-panel-container">
+              <div class="ha-panel-handle" id="ha-panel-handle">
+                <span class="ha-panel-title">🎛️ HomeAITuber</span>
+                <span class="ha-panel-status" id="ha-status">○ 未接続</span>
+                <span class="ha-panel-chevron">▼</span>
+              </div>
+              <div class="ha-panel-body">
+                <div class="ha-row">
+                  <button class="ha-btn ha-btn-gfx" id="ha-gfx-btn" onclick="window.__ha_toggleGfx()">🖼️ ON</button>
+                  <button class="ha-btn ha-btn-radio" id="ha-radio-btn" onclick="window.__ha_fireRadio()">📻 ラジオ発火</button>
+                </div>
+                <div>
+                  <div class="ha-label">Mood</div>
+                  <div class="ha-row" id="ha-mood-row">
+                    <button class="ha-btn ha-btn-mood active" data-mood=""  onclick="window.__ha_setMood(this)">auto</button>
+                    <button class="ha-btn ha-btn-mood" data-mood="chaotic" onclick="window.__ha_setMood(this)">🤪 chaotic</button>
+                    <button class="ha-btn ha-btn-mood" data-mood="chill" onclick="window.__ha_setMood(this)">😌 chill</button>
+                    <button class="ha-btn ha-btn-mood" data-mood="brisk" onclick="window.__ha_setMood(this)">⚡ brisk</button>
+                    <button class="ha-btn ha-btn-mood" data-mood="thoughtful" onclick="window.__ha_setMood(this)">🤔 thoughtful</button>
+                  </div>
+                </div>
+                <div>
+                  <div class="ha-label">📜 最近のラジオ</div>
+                  <div class="ha-recent" id="ha-recent-list">
+                    <div style="color:#666;font-size:11px;padding:8px;">接続中...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+          document.body.appendChild(panel);
+
+          // Panel collapse/expand
+          document.getElementById('ha-panel-handle').addEventListener('click', () => {
+            panelOpen = !panelOpen;
+            const container = document.getElementById('ha-panel-container');
+            if (panelOpen) container.classList.remove('collapsed');
+            else container.classList.add('collapsed');
+          });
+
+          // Global handlers
+          window.__ha_toggleGfx = () => setLive2DVisible(!graphicsEnabled);
+          window.__ha_setMood = (btn) => {
+            document.querySelectorAll('#ha-mood-row .ha-btn-mood').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+          };
+          window.__ha_fireRadio = () => {
+            const active = document.querySelector('#ha-mood-row .ha-btn-mood.active');
+            const mood = active ? active.dataset.mood : null;
+            triggerRadio(mood || undefined);
+          };
+
+          // Collapse by default on mobile (portrait)
+          if (window.innerWidth < 600 && window.innerHeight < 800) {
+            panelOpen = false;
+            document.getElementById('ha-panel-container').classList.add('collapsed');
+          }
+        }
+
+        // ── Init ──
+        function init() {
+          buildPanel();
+          connectRadioWS();
+          interceptChatWebSocket();
+        }
+
+        // Go immediately — don't wait for canvas
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', () => setTimeout(init, 500));
+        } else {
+          setTimeout(init, 500);
+        }
+
+        // Also try on canvas appearance (for Live2D toggle to work properly)
+        const obs = new MutationObserver(() => {
+          if (document.querySelector('canvas')) {
+            // Live2D loaded — ensure gfx state is correct
+            if (!graphicsEnabled) setLive2DVisible(false);
+          }
         });
+        obs.observe(document.body, { childList: true, subtree: true });
       })();
     </script>
   </head>
