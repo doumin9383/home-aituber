@@ -63,6 +63,11 @@ class RadioServerIntegration:
         self.interval_seconds = interval_seconds
         self.consolidation_interval_minutes = consolidation_interval_minutes
         self._memory_worker = MemoryWorker(soul_dir)
+        self._tts_engine = None  # Set via set_tts_engine() after server init
+
+    def set_tts_engine(self, tts_engine) -> None:
+        """Set the TTS engine reference after server initialization."""
+        self._tts_engine = tts_engine
 
     def attach_to_app(self, app: FastAPI) -> None:
         """Register WebSocket and HTTP endpoints."""
@@ -104,6 +109,8 @@ class RadioServerIntegration:
                         if self._engine:
                             segment = await self._engine.generate_segment(mood=mood)
                             if segment:
+                                # Run TTS playback before notifying frontend
+                                await self._engine._playback_segment(segment)
                                 await self._broadcast_segment(segment)
 
                     elif msg_type in ("comment", "feedback"):
@@ -152,6 +159,38 @@ class RadioServerIntegration:
                 dead_clients.add(ws)
         self._radio_clients -= dead_clients
 
+    async def _broadcast_audio(self, audio_payload: dict) -> None:
+        """Send an audio payload to all connected radio-ws clients."""
+        dead_clients: Set[WebSocket] = set()
+        payload_json = json.dumps(audio_payload, ensure_ascii=False)
+        for ws in self._radio_clients:
+            try:
+                if ws.client_state == WebSocketState.CONNECTED:
+                    await ws.send_text(payload_json)
+            except Exception as e:
+                logger.warning(f"Failed to send audio to radio client: {e}")
+                dead_clients.add(ws)
+        self._radio_clients -= dead_clients
+
+    async def _tts_callback(self, text: str, lang: str) -> None:
+        """TTS callback for RadioTickEngine — generate audio and broadcast to frontend."""
+        if not self._tts_engine:
+            return
+        try:
+            from src.open_llm_vtuber.utils.stream_audio import prepare_audio_payload
+            from src.open_llm_vtuber.agent.output_types import DisplayText
+
+            audio_path = await self._tts_engine.async_generate_audio(text)
+            if audio_path:
+                display = DisplayText(text=f"[{lang}] {text}", name="HomeAITuber")
+                payload = prepare_audio_payload(
+                    audio_path,
+                    display_text=display,
+                )
+                await self._broadcast_audio(payload)
+        except Exception as e:
+            logger.error(f"Radio TTS failed: {e}")
+
     async def _notify_callback(self, segment_dict: dict) -> None:
         """Callback for RadioTickEngine — broadcasts via WebSocket."""
         segment = RadioSegment(segment_dict)
@@ -184,6 +223,7 @@ class RadioServerIntegration:
             llm_model=self.llm_model,
             llm_api_key=self.llm_api_key,
             interval_seconds=self.interval_seconds,
+            tts_callback=self._tts_callback if self._tts_engine else None,
             notify_callback=self._notify_callback,
         )
 

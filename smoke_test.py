@@ -113,7 +113,7 @@ async def ws_test():
             
             for i in range(30):
                 try:
-                    msg = await asyncio.wait_for(ws.recv(), timeout=20)
+                    msg = await asyncio.wait_for(ws.recv(), timeout=60)
                 except asyncio.TimeoutError:
                     break
                 data = json.loads(msg)

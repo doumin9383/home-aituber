@@ -53,6 +53,8 @@
                 if (msg.type === 'radio-segment' && msg.segment) {
                   addRecentSegment(msg.segment);
                   showRadioOverlay(msg.segment);
+                } else if (msg.type === 'audio' && msg.audio) {
+                  playRadioAudio(msg);
                 } else if (msg.type === 'pong') {
                   // keepalive
                 }
@@ -159,6 +161,31 @@
           const d = document.createElement('div');
           d.textContent = text;
           return d.innerHTML;
+        }
+
+        // ── Audio playback ──
+        let _radioAudio = null;
+        function playRadioAudio(msg) {
+          try {
+            // Decode base64 WAV
+            const binaryStr = atob(msg.audio);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+            const blob = new Blob([bytes], { type: 'audio/wav' });
+            const url = URL.createObjectURL(blob);
+
+            // Stop any currently playing radio audio
+            if (_radioAudio) {
+              _radioAudio.pause();
+              URL.revokeObjectURL(_radioAudio.src);
+            }
+
+            _radioAudio = new Audio(url);
+            _radioAudio.play().catch(e => console.warn('[HA Radio] Audio play failed:', e));
+            _radioAudio.onended = () => URL.revokeObjectURL(url);
+          } catch(e) {
+            console.warn('[HA Radio] Audio decode failed:', e);
+          }
         }
 
         // ── Chat interception → radio feedback ──

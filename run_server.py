@@ -195,6 +195,8 @@ def run(console_log_level: str):
     logger.info("Initializing server context...")
     try:
         asyncio.run(server.initialize())
+        # Wire TTS engine into radio integration (now that server is initialized)
+        radio_integration.set_tts_engine(server.default_context_cache.tts_engine)
         logger.info("Server context initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize server context: {e}")

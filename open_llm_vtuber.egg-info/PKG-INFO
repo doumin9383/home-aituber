@@ -1,0 +1,189 @@
+Metadata-Version: 2.4
+Name: open-llm-vtuber
+Version: 1.2.1
+Summary: Talk to any LLM with hands-free voice interaction, voice interruption, and Live2D taking face running locally across platforms
+Requires-Python: <3.13,>=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+License-File: LICENSE-Live2D.md
+Requires-Dist: anthropic>=0.40.0
+Requires-Dist: azure-cognitiveservices-speech>=1.41.1
+Requires-Dist: chardet>=5.2.0
+Requires-Dist: cartesia>=2.0.0
+Requires-Dist: edge-tts>=7.0.0
+Requires-Dist: elevenlabs>=1.0.0
+Requires-Dist: fastapi[standard]>=0.115.8
+Requires-Dist: groq>=0.13.0
+Requires-Dist: httpx>=0.28.1
+Requires-Dist: langdetect>=1.0.9
+Requires-Dist: loguru>=0.7.2
+Requires-Dist: mcp[cli]>=1.6.0
+Requires-Dist: numpy<2,>=1.26.4
+Requires-Dist: onnxruntime>=1.20.1
+Requires-Dist: openai>=1.57.4
+Requires-Dist: pre-commit>=4.1.0
+Requires-Dist: pydub>=0.25.1
+Requires-Dist: pysbd>=0.3.4
+Requires-Dist: pyttsx3>=2.98
+Requires-Dist: pyyaml>=6.0.2
+Requires-Dist: requests>=2.32.3
+Requires-Dist: ruamel-yaml>=0.18.10
+Requires-Dist: ruff>=0.8.6
+Requires-Dist: scipy>=1.14.1
+Requires-Dist: sherpa-onnx>=1.10.39
+Requires-Dist: soundfile>=0.12.1
+Requires-Dist: tomli>=2.2.1
+Requires-Dist: torch==2.2.2; sys_platform == "darwin" and platform_machine == "x86_64"
+Requires-Dist: torch>=2.6.0; sys_platform == "darwin" and platform_machine == "arm64"
+Requires-Dist: torch>=2.6.0; sys_platform != "darwin"
+Requires-Dist: tqdm>=4.67.1
+Requires-Dist: uvicorn[standard]>=0.33.0
+Requires-Dist: websocket-client>=1.8.0
+Requires-Dist: letta-client>=0.1.100
+Requires-Dist: duckduckgo-mcp-server>=0.1.1
+Provides-Extra: bilibili
+Requires-Dist: aiohttp>=3.10.0; extra == "bilibili"
+Requires-Dist: Brotli~=1.1.0; extra == "bilibili"
+Requires-Dist: yarl<2.0,>=1.12.0; extra == "bilibili"
+Dynamic: license-file
+
+<p align="center">
+  <img src="./assets/banner.jpg" alt="HomeAITuber" />
+</p>
+
+<h1 align="center">HomeAITuber</h1>
+<h3 align="center">
+  逸汎の誤家庭向け常駐AITuber
+  <br/>
+  <em>A local-first personal AITuber for ordinary households with unusually capable home AI appliances.</em>
+</h3>
+
+<p align="center">
+  <a href="./SPEC.md">📖 Specification</a>
+  ·
+  <a href="#-quick-start">🚀 Quick Start</a>
+  ·
+  <a href="#-architecture">🏗️ Architecture</a>
+  ·
+  <a href="#-phases">📋 Phases</a>
+</p>
+
+---
+
+**HomeAITuber** is a local-first, audio-first personal AITuber that lives inside the user's home network, speaks in a cute voice, remembers preferences, and turns interesting topics into English-Japanese radio.
+
+> 英語嫌いでも続く、自分専用の英日AIラジオ相棒
+
+HomeAITuber is **not** a public VTuber, not a cloud assistant, and not a surveillance agent. It is a private AITuber companion for your `$HOME`, homelab, or LAN.
+
+---
+
+## 🔄 Project Status
+
+HomeAITuber v0 is currently in **Phase 0** (Fork & Rename).
+
+See [SPEC.md](./SPEC.md) for the full implementation plan.
+
+## 🧬 Fork Base
+
+HomeAITuber is a fork of **[Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber)**, which provides:
+
+- WebSocket backend
+- ASR (speech recognition)
+- TTS (text-to-speech)
+- VAD (voice activity detection)
+- Live2D / visual frontend support
+- Character configuration & persona prompts
+- Chat history persistence
+- Proactive speaking & agent interface
+
+HomeAITuber adds the **private household layer**:
+- 🎙️ Audio-first radio mode (EN→JP→EN_REPEAT)
+- 💾 Local soul state (`soul/` directory)
+- 🤖 Mattermost adapter for control & logging
+- 📝 Feedback logging (like / skip / boring / save_phrase)
+- 🌙 Background memory worker (Dream Mode)
+- 🔒 LAN-only deployment & privacy doctrine
+
+## 🎯 Core Principles
+
+| Principle | Description |
+|---|---|
+| **Local-first** | Everything runs inside your LAN. No cloud dependency. |
+| **Audio-first** | Radio mode is the primary interface. Visual is optional. |
+| **Privacy by default** | No WAN exposure, no filesystem scanning, no surveillance. |
+| **Light hot path** | Full memory scan and tool execution never block real-time conversation. |
+| **Personality > Productivity** | Cute, chaotic, funny — not a corporate assistant. |
+
+## 🚀 Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/doumin9383/home-aituber.git
+cd home-aituber
+
+# Install dependencies
+uv sync
+
+# Run the server (Open-LLM-VTuber backend)
+uv run run_server.py
+```
+
+> **Note:** HomeAITuber v0 is under active development. Radio mode, Mattermost integration, and the soul layer are being built incrementally. See [SPEC.md](./SPEC.md) for the current phase.
+
+## 🏗️ Architecture
+
+```
+HomeAITuber
+  ├─ Open-LLM-VTuber backend (body)
+  │   ├─ ASR, TTS, VAD
+  │   ├─ WebSocket
+  │   ├─ character config
+  │   └─ proactive speak
+  │
+  ├─ homeaituber layer
+  │   ├─ radio_prompt_builder.py
+  │   ├─ soul/ (identity, memory, state)
+  │   ├─ mattermost_adapter.py
+  │   ├─ feedback_logger.py
+  │   ├─ memory_worker.py
+  │   └─ audio_only_frontend/
+  │
+  └─ future integrations
+      ├─ Hermes bridge
+      ├─ MCP
+      └─ AIRI migration adapter
+```
+
+## 📋 Implementation Phases
+
+| Phase | What | Status |
+|---|---|---|
+| **0** | Fork & rename, README, project concept | 🟡 In progress |
+| **1** | Radio mode (prompt builder, structured output) | ⬜ Not started |
+| **2** | Soul directory (identity, profile, weights) | ⬜ Not started |
+| **3** | Mattermost adapter (commands, transcript, feedback) | ⬜ Not started |
+| **4** | Memory worker (Dream Mode, consolidation) | ⬜ Not started |
+| **5** | k3s manifests (deploy, PVC, CronJob) | ⬜ Not started |
+
+## 🔒 Privacy
+
+HomeAITuber is designed to be **private by default**:
+
+- ❌ No WAN exposure by default
+- ❌ No filesystem-wide read access
+- ❌ No browser history reading
+- ❌ No autonomous Hermes/tool execution in v0
+- ✅ LAN-only operation
+- ✅ Access to `soul/`, `chat_history/`, `cache/`, `config/` only
+- ✅ User controls what the system sees and does
+
+## 📜 License
+
+This project is a fork of [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber) and is distributed under the same license terms. See [LICENSE](./LICENSE) for details.
+
+---
+
+<p align="center">
+  <sub>HomeAITuber belongs to your home network. It must not invite itself outside.</sub>
+</p>

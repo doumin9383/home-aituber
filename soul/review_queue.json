@@ -1,1 +1,9 @@
-[]
+[
+  {"en": "Is it just me or...", "jp": "「私だけかな？」「〜じゃない？」と自分の感覚を控えめに伝える表現", "phrase": "Is it just me or...", "note": "共感を求めたり、自分の感覚をやわらかく伝える時に便利", "topic": "daily_conversation"},
+  {"en": "I keep telling myself", "jp": "「自分に言い聞かせ続けてる」習慣や言い訳を表現", "phrase": "I keep telling myself", "note": "繰り返し自分に言い聞かせるニュアンス", "topic": "developer_humor"},
+  {"en": "Throw hardware at the problem", "jp": "「問題にハードウェアをぶつける」皮肉っぽい言い回し", "phrase": "Throw hardware at the problem", "note": "ソフトウェア解決じゃなくてハードウェアで解決しようとする姿勢", "topic": "homelab"},
+  {"en": "loving every second of it", "jp": "「一瞬一瞬を最高に楽しんでいる」カオスでも楽しい状況で", "phrase": "loving every second of it", "note": "大変だけど楽しい時に使う表現", "topic": "chaotic_energy"},
+  {"en": "running smoothly", "jp": "「順調に動いている」システムやプロジェクトに使う", "phrase": "running smoothly", "note": "問題なく動いている状態を表現", "topic": "self_hosted"},
+  {"en": "dive into", "jp": "「〜に熱中する」「深く入り込む」", "phrase": "dive into", "note": "趣味やプロジェクトに全力で取り組む時に便利な句動詞", "topic": "productivity"},
+  {"en": "drift by", "jp": "「ゆっくり流れていく」雲や風景に使う表現", "phrase": "drift by", "note": "景色を眺めるような時に使う優しい表現", "topic": "ambient"}
+]
