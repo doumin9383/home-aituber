@@ -213,15 +213,17 @@ spec:
               fi
 
               # ── 5c. Fix conversation hang: add 30s timeout + continue on timeout ──
-              # Issue: server waits indefinitely for frontend-playback-complete
-              # and when timeout happens, it returns without sending chain-end.
-              # Fix: add timeout AND change "return" to "pass" so chain-end is sent.
-              sed -i 's|client_uid, "frontend-playback-complete"|client_uid, "frontend-playback-complete", timeout=30|' \
-                /workspace/home-aituber/src/open_llm_vtuber/conversations/conversation_utils.py 2>/dev/null || true
-              # After the timeout, don't return — continue to send chain-end
-              sed -i '/if not response:/{n;n;s/^            return$/            # return commented out - continue to send chain-end/}' \
-                /workspace/home-aituber/src/open_llm_vtuber/conversations/conversation_utils.py 2>/dev/null || true
-              echo "Conversation timeout+continue patched"
+              # Only patch if timeout is not already present (commits >= ef96aba have it)
+              if ! grep -q 'timeout=30' /workspace/home-aituber/src/open_llm_vtuber/conversations/conversation_utils.py 2>/dev/null; then
+                sed -i 's|client_uid, "frontend-playback-complete"|client_uid, "frontend-playback-complete", timeout=30|' \
+                  /workspace/home-aituber/src/open_llm_vtuber/conversations/conversation_utils.py 2>/dev/null || true
+                # After the timeout, don't return — continue to send chain-end
+                sed -i '/if not response:/{n;n;s/^            return$/            # return commented out - continue to send chain-end/}' \
+                  /workspace/home-aituber/src/open_llm_vtuber/conversations/conversation_utils.py 2>/dev/null || true
+                echo "Conversation timeout+continue patched"
+              else
+                echo "Conversation timeout already present, skipping patch"
+              fi
 
               # ── 5d. Set default model globals in main JS ──
               # Prevents the first LAppLive2DManager.changeScene(0) from
