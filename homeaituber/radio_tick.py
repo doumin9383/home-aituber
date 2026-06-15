@@ -173,6 +173,7 @@ class RadioTickEngine:
 
             # Atlas/Gemma-4 doesn't support response_format properly
             # Use a strong system prompt instead.
+            t_start = time.time()
             response = client.chat.completions.create(
                 model=self.llm_model,
                 messages=[
@@ -180,10 +181,19 @@ class RadioTickEngine:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.85,
-                max_tokens=1024,
+                max_tokens=512,
+                stream=False,
             )
+            t_llm = time.time() - t_start
 
             raw = response.choices[0].message.content
+            usage = response.usage
+            if usage:
+                p_tok = usage.prompt_tokens
+                c_tok = usage.completion_tokens
+                tok_s = c_tok / t_llm if t_llm > 0 else 0
+                logger.info(f"LLM generated {c_tok} tokens in {t_llm:.1f}s ({tok_s:.0f} tok/s, prompt={p_tok})")
+
             if not raw:
                 logger.error("LLM returned empty response")
                 return None

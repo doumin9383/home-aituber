@@ -234,25 +234,54 @@ class RadioPromptBuilder:
             "",
             "## Task",
             f"Language mode: {lang_label}. {lang_hint}",
+            f"Style: {style['name']} — {style['sentence_guidance']}",
             "Generate a bilingual radio segment in this JSON format:",
             "{",
             '  "segment_id": "radio-YYYYMMDD-HHMMSS",',
-            '  "en": "One natural English sentence -- warm, friend energy",',
+            f'  "en": "{style["sentence_guidance"]}",',
             '  "jp": "自然な日本語で。教科書っぽくなくてフレンドリーに",',
             '  "en_repeat": "Same English for passive listening reinforcement",',
-            '  "phrase": "One genuinely useful English expression from the segment, or empty string",',
-            '  "note": "If phrase is set: short Japanese explanation of when/how to use it",',
+        ]
+
+        if style["use_phrase"]:
+            prompt_lines.extend([
+                '  "phrase": "One genuinely useful English expression from the segment, or empty string",',
+                '  "note": "If phrase is set: short Japanese explanation of when/how to use it",',
+            ])
+        else:
+            prompt_lines.extend([
+                '  "phrase": "",',
+                '  "note": "",',
+            ])
+
+        prompt_lines.extend([
             '  "topic": "topic category matching user interests (homelab, local_ai, self_hosted,...)",',
             '  "mood": "' + active_mood + '",',
             '  "extra": "Short optional side note or joke, or empty string",',
-            '  "segments": [',
-            '    {"en": "Short opening", "jp": "短いオープニング"},',
-            '    {"en": "Maybe a second segment", "jp": "2つ目の短いやりとり"}',
-            "  ]",
+        ])
+
+        if style["use_segments"]:
+            # Number of sub-segments varies by style
+            if style["name"] == "extended":
+                sub_count_hint = "2-4"
+            else:
+                sub_count_hint = "1-2"
+            prompt_lines.extend([
+                f'  "segments": [  // {sub_count_hint} short mini-exchanges (vary the count)',
+                '    {"en": "Short opening", "jp": "短いオープニング"},',
+                '    {"en": "Another bit", "jp": "もう一つ"}',
+                "  ]",
+            ])
+        else:
+            prompt_lines.extend([
+                '  "segments": []',
+            ])
+
+        prompt_lines.extend([
             "}",
             "",
             "## Constraints",
-            "- Total spoken length: 20-40 seconds",
+            f"- Total spoken length: {style['target_seconds']} seconds",
             "- Friend energy, not teacher energy — Shuto is your neighbor, not your student",
             "- One useful phrase maximum. Leave empty string if not useful.",
             "- No forced quizzes, no corporate tone",
@@ -261,7 +290,7 @@ class RadioPromptBuilder:
             "- Use the review queue phrases naturally in context if they fit",
             "- Do not pretend to have accessed private data",
             "- Output ONLY valid JSON. No markdown fences, no extra text.",
-        ]
+        ])
 
         if user_command:
             prompt_lines.append("")
