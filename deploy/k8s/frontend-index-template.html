@@ -163,29 +163,42 @@
           return d.innerHTML;
         }
 
-        // ── Audio playback ──
-        let _radioAudio = null;
+        // ── Audio playback (queued, sequential) ──
+        let _radioAudioQueue = [];
+        let _radioAudioPlaying = false;
+
         function playRadioAudio(msg) {
           try {
-            // Decode base64 WAV
+            // Decode base64 WAV → Blob → object URL
             const binaryStr = atob(msg.audio);
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
             const blob = new Blob([bytes], { type: 'audio/wav' });
             const url = URL.createObjectURL(blob);
-
-            // Stop any currently playing radio audio
-            if (_radioAudio) {
-              _radioAudio.pause();
-              URL.revokeObjectURL(_radioAudio.src);
-            }
-
-            _radioAudio = new Audio(url);
-            _radioAudio.play().catch(e => console.warn('[HA Radio] Audio play failed:', e));
-            _radioAudio.onended = () => URL.revokeObjectURL(url);
+            _radioAudioQueue.push(url);
+            _playNextInQueue();
           } catch(e) {
             console.warn('[HA Radio] Audio decode failed:', e);
           }
+        }
+
+        function _playNextInQueue() {
+          if (_radioAudioPlaying || _radioAudioQueue.length === 0) return;
+          _radioAudioPlaying = true;
+          const url = _radioAudioQueue.shift();
+          const audio = new Audio(url);
+          audio.play().catch(e => {
+            console.warn('[HA Radio] Audio play failed:', e);
+            URL.revokeObjectURL(url);
+            _radioAudioPlaying = false;
+            _playNextInQueue();
+          });
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            _radioAudioPlaying = false;
+            // Small gap between segments
+            setTimeout(() => _playNextInQueue(), 200);
+          };
         }
 
         // ── Chat interception → radio feedback ──
