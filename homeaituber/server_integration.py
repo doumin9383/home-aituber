@@ -20,7 +20,7 @@ Usage:
 
 import asyncio
 import json
-import logging
+import logging as _logging
 from pathlib import Path
 from typing import Optional, Set
 
@@ -30,7 +30,7 @@ from starlette.websockets import WebSocketState
 from homeaituber.radio_tick import RadioTickEngine, RadioSegment
 from homeaituber.memory_worker import MemoryWorker
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class RadioServerIntegration:
