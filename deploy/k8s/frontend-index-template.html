@@ -9,7 +9,7 @@
     <script type="module" crossorigin src="./assets/main-nu7uwxNJ.js"></script>
     <script>
       // ═══════════════════════════════════════════════════════════
-      //  HomeAITuber Control Panel v2 — mobile-first
+      //  HomeAITuber Control Panel v3 — state-aware
       // ═══════════════════════════════════════════════════════════
       (function() {
         // ── state ──
@@ -19,6 +19,12 @@
         let panelOpen = true;
         let recentSegments = [];
         const MAX_RECENT = 5;
+
+        // Radio lifecycle: idle → generating → playing → idle
+        let _radioState = 'idle';  // 'idle' | 'generating' | 'playing'
+        let _radioAudioQueue = [];
+        let _radioAudioPlaying = false;
+        let _currentAudio = null;  // currently playing Audio element
 
         // ── Live2D visibility ──
         function setLive2DVisible(visible) {
@@ -34,6 +40,35 @@
             btn.textContent = visible ? '🖼️ ON' : '🎧 OFF';
             btn.style.background = visible ? '#4ecca3' : '#ff6b6b';
           }
+        }
+
+        // ── Radio button state ──
+        function setRadioState(state) {
+          _radioState = state;
+          const btn = document.getElementById('ha-radio-btn');
+          if (!btn) return;
+          const states = {
+            idle:     ['📻 ラジオ発火', '#ff6b9d', false],
+            generating: ['⏳ 生成中...', '#ffd93d', true],
+            playing:  ['🔊 再生中...', '#4ecca3', false],
+          };
+          const [text, color, disabled] = states[state] || states.idle;
+          btn.textContent = text;
+          btn.style.background = color;
+          btn.disabled = disabled;
+          btn.style.opacity = disabled ? '0.6' : '1';
+        }
+
+        function stopAllRadioAudio() {
+          if (_currentAudio) {
+            _currentAudio.pause();
+            if (_currentAudio.src) URL.revokeObjectURL(_currentAudio.src);
+            _currentAudio = null;
+          }
+          // Flush queue and revoke URLs
+          _radioAudioQueue.forEach(url => URL.revokeObjectURL(url));
+          _radioAudioQueue = [];
+          _radioAudioPlaying = false;
         }
 
         // ── Radio WS ──
@@ -53,6 +88,8 @@
                 if (msg.type === 'radio-segment' && msg.segment) {
                   addRecentSegment(msg.segment);
                   showRadioOverlay(msg.segment);
+                  // Transition: generating → playing
+                  if (_radioState === 'generating') setRadioState('playing');
                 } else if (msg.type === 'audio' && msg.audio) {
                   playRadioAudio(msg);
                 } else if (msg.type === 'pong') {
@@ -80,13 +117,16 @@
         }
 
         function triggerRadio(mood) {
-          sendRadioCommand({ type: 'request-radio', mood: mood || null });
-          // Flash the button
-          const btn = document.getElementById('ha-radio-btn');
-          if (btn) {
-            btn.style.transform = 'scale(0.92)';
-            setTimeout(() => { btn.style.transform = ''; }, 150);
+          if (_radioState === 'generating') {
+            // Debounce: already generating, ignore double-tap
+            return;
           }
+          if (_radioState === 'playing') {
+            // Interrupt: stop current audio, flush queue, fire new
+            stopAllRadioAudio();
+          }
+          setRadioState('generating');
+          sendRadioCommand({ type: 'request-radio', mood: mood || null });
         }
 
         function updateStatus(state) {
@@ -164,12 +204,8 @@
         }
 
         // ── Audio playback (queued, sequential) ──
-        let _radioAudioQueue = [];
-        let _radioAudioPlaying = false;
-
         function playRadioAudio(msg) {
           try {
-            // Decode base64 WAV → Blob → object URL
             const binaryStr = atob(msg.audio);
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
@@ -183,20 +219,28 @@
         }
 
         function _playNextInQueue() {
-          if (_radioAudioPlaying || _radioAudioQueue.length === 0) return;
+          if (_radioAudioPlaying || _radioAudioQueue.length === 0) {
+            // Queue drained → idle
+            if (_radioAudioQueue.length === 0 && _radioState === 'playing') {
+              setRadioState('idle');
+            }
+            return;
+          }
           _radioAudioPlaying = true;
           const url = _radioAudioQueue.shift();
           const audio = new Audio(url);
+          _currentAudio = audio;
           audio.play().catch(e => {
             console.warn('[HA Radio] Audio play failed:', e);
             URL.revokeObjectURL(url);
+            _currentAudio = null;
             _radioAudioPlaying = false;
             _playNextInQueue();
           });
           audio.onended = () => {
             URL.revokeObjectURL(url);
+            _currentAudio = null;
             _radioAudioPlaying = false;
-            // Small gap between segments
             setTimeout(() => _playNextInQueue(), 200);
           };
         }
@@ -334,7 +378,6 @@
                 font-size: 11px;
                 -webkit-overflow-scrolling: touch;
               }
-              /* mobile tweaks */
               @media (max-width: 400px) {
                 .ha-btn { padding: 8px 12px; font-size: 12px; }
                 .ha-btn-radio { font-size: 14px; }
@@ -373,7 +416,6 @@
           `;
           document.body.appendChild(panel);
 
-          // Panel collapse/expand
           document.getElementById('ha-panel-handle').addEventListener('click', () => {
             panelOpen = !panelOpen;
             const container = document.getElementById('ha-panel-container');
@@ -381,7 +423,6 @@
             else container.classList.add('collapsed');
           });
 
-          // Global handlers
           window.__ha_toggleGfx = () => setLive2DVisible(!graphicsEnabled);
           window.__ha_setMood = (btn) => {
             document.querySelectorAll('#ha-mood-row .ha-btn-mood').forEach(b => b.classList.remove('active'));
@@ -393,7 +434,6 @@
             triggerRadio(mood || undefined);
           };
 
-          // Collapse by default on mobile (portrait)
           if (window.innerWidth < 600 && window.innerHeight < 800) {
             panelOpen = false;
             document.getElementById('ha-panel-container').classList.add('collapsed');
@@ -407,17 +447,14 @@
           interceptChatWebSocket();
         }
 
-        // Go immediately — don't wait for canvas
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', () => setTimeout(init, 500));
         } else {
           setTimeout(init, 500);
         }
 
-        // Also try on canvas appearance (for Live2D toggle to work properly)
         const obs = new MutationObserver(() => {
           if (document.querySelector('canvas')) {
-            // Live2D loaded — ensure gfx state is correct
             if (!graphicsEnabled) setLive2DVisible(false);
           }
         });
