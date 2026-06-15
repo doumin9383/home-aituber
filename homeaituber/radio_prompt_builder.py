@@ -21,6 +21,7 @@ Output:
 
 import json
 import logging
+import random
 from pathlib import Path
 from typing import Optional
 
@@ -51,6 +52,73 @@ MOOD_PROMPTS = {
 }
 
 DEFAULT_MOOD = "brisk"
+
+# Segment styles with natural length variation (randomly selected per tick)
+SEGMENT_STYLES = [
+    {
+        "name": "micro",
+        "target_seconds": "5-10",
+        "sentence_guidance": "One quick sentence. Keep it tight.",
+        "use_segments": False,
+        "use_phrase": False,
+        "weight": 2,  # 頻度高め: 息抜きにちょうどいい
+    },
+    {
+        "name": "one-liner",
+        "target_seconds": "10-18",
+        "sentence_guidance": "A short, punchy thought. Natural conversational flow — might be 1-2 sentences.",
+        "use_segments": False,
+        "use_phrase": True,
+        "weight": 3,
+    },
+    {
+        "name": "standard",
+        "target_seconds": "18-35",
+        "sentence_guidance": "A natural radio segment. Vary the pacing — sometimes one longer thought, sometimes a few short exchanges.",
+        "use_segments": True,
+        "use_phrase": True,
+        "weight": 3,
+    },
+    {
+        "name": "extended",
+        "target_seconds": "40-70",
+        "sentence_guidance": "Take your time. Go a bit deeper — a story, a tech tangent, or a rambling joke. Multiple sentences OK.",
+        "use_segments": True,
+        "use_phrase": True,
+        "weight": 1,
+    },
+]
+
+# Language mode definitions
+LANGUAGE_SCHEMAS = {
+    "en": {
+        "label": "EN only",
+        "fields": ["en"],
+        "format_hint": "Output ONLY the 'en' field. Set 'jp', 'en_repeat', 'phrase', 'note' to empty strings.",
+    },
+    "jp": {
+        "label": "JP only",
+        "fields": ["jp"],
+        "format_hint": "Output ONLY the 'jp' field (as 'en' for consistency). Set 'jp' to the Japanese text, leave others empty.",
+    },
+    "en-jp": {
+        "label": "EN → JP",
+        "fields": ["en", "jp", "en_repeat"],
+        "format_hint": "Standard EN → JP → EN_REPEAT flow. 'phrase' and 'note' optional.",
+    },
+    "en-jp-note": {
+        "label": "EN → JP → 解説",
+        "fields": ["en", "jp", "en_repeat", "phrase", "note"],
+        "format_hint": "Always include 'phrase' (useful expression) and 'note' (Japanese explanation). This is a learning-focused mode.",
+    },
+    "mixed": {
+        "label": "EN⇄JP mixed",
+        "fields": ["en", "jp", "en_repeat", "phrase", "note"],
+        "format_hint": "Mix English and Japanese naturally. Use 'en' for English parts, 'jp' for Japanese parts. Match the user's input language.",
+    },
+}
+
+DEFAULT_LANGUAGE = "en-jp"
 
 
 class RadioPromptBuilder:
@@ -92,6 +160,7 @@ class RadioPromptBuilder:
         mode: str = "radio",
         user_command: Optional[str] = None,
         mood: Optional[str] = None,
+        language_mode: Optional[str] = None,
     ) -> str:
         """Build a prompt for bilingual radio segment generation.
 
@@ -99,6 +168,7 @@ class RadioPromptBuilder:
             mode: 'radio' or 'chat'
             user_command: Optional trigger command from user
             mood: Optional mood override (chaotic | chill | brisk | thoughtful)
+            language_mode: Optional language mode (en | jp | en-jp | en-jp-note | mixed)
 
         Returns:
             A prompt string ready to send to the Speaker LLM
@@ -113,6 +183,19 @@ class RadioPromptBuilder:
         if active_mood not in MOOD_PROMPTS:
             active_mood = DEFAULT_MOOD
         mood_desc = MOOD_PROMPTS[active_mood]
+
+        # Resolve language mode
+        active_lang = (language_mode or DEFAULT_LANGUAGE).lower()
+        if active_lang not in LANGUAGE_SCHEMAS:
+            active_lang = DEFAULT_LANGUAGE
+        lang_schema = LANGUAGE_SCHEMAS[active_lang]
+        lang_label = lang_schema["label"]
+        lang_hint = lang_schema["format_hint"]
+
+        # Randomly select segment style for natural length variation
+        weights = [s["weight"] for s in SEGMENT_STYLES]
+        style = random.choices(SEGMENT_STYLES, weights=weights, k=1)[0]
+        logger.debug(f"Radio segment style: {style['name']} ({style['target_seconds']}s)")
 
         # Build compact context
         top_topics = sorted(
@@ -150,6 +233,7 @@ class RadioPromptBuilder:
             mood_desc,
             "",
             "## Task",
+            f"Language mode: {lang_label}. {lang_hint}",
             "Generate a bilingual radio segment in this JSON format:",
             "{",
             '  "segment_id": "radio-YYYYMMDD-HHMMSS",',

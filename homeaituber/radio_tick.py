@@ -16,7 +16,6 @@ Design:
 import asyncio
 import json
 import logging
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -148,17 +147,19 @@ class RadioTickEngine:
         self._task: Optional[asyncio.Task] = None
         self._running = False
         self._last_segment: Optional[RadioSegment] = None
+        self._language_mode: Optional[str] = None
 
-    async def generate_segment(self, user_command: Optional[str] = None, mood: Optional[str] = None) -> Optional[RadioSegment]:
+    async def generate_segment(self, user_command: Optional[str] = None, mood: Optional[str] = None, language_mode: Optional[str] = None) -> Optional[RadioSegment]:
         """Generate a single radio segment: build prompt → call LLM → parse output.
 
         Args:
             user_command: Optional trigger command from user
             mood: Optional mood override (chaotic | chill | brisk | thoughtful)
+            language_mode: Optional language mode override
 
         Returns RadioSegment on success, None on failure.
         """
-        prompt = self.builder.build_radio_prompt(user_command=user_command, mood=mood)
+        prompt = self.builder.build_radio_prompt(user_command=user_command, mood=mood, language_mode=language_mode)
 
         try:
             from openai import OpenAI
@@ -228,10 +229,10 @@ class RadioTickEngine:
                 elif part["type"] == "pause":
                     await asyncio.sleep(part["duration_ms"] / 1000)
 
-    async def _tick(self) -> None:
+    async def _tick(self, language_mode: Optional[str] = None) -> None:
         """Execute one radio tick: generate segment → playback → notify."""
         logger.info("Radio tick starting...")
-        segment = await self.generate_segment()
+        segment = await self.generate_segment(language_mode=language_mode)
         if segment is None:
             logger.warning("Radio tick produced no segment")
             return
@@ -262,13 +263,13 @@ class RadioTickEngine:
 
         try:
             # Fire an immediate first segment
-            await self._tick()
+            await self._tick(language_mode=self._language_mode)
 
             while self._running:
                 await asyncio.sleep(self.interval)
                 if not self._running:
                     break
-                await self._tick()
+                await self._tick(language_mode=self._language_mode)
 
         except asyncio.CancelledError:
             logger.info("Radio tick engine cancelled")
@@ -298,6 +299,11 @@ class RadioTickEngine:
 
     def is_running(self) -> bool:
         return self._running
+
+    def set_language_mode(self, language_mode: Optional[str]) -> None:
+        """Update the language mode for subsequent auto-ticks."""
+        self._language_mode = language_mode
+        logger.info(f"Radio language mode set to: {language_mode}")
 
     def last_segment(self) -> Optional[RadioSegment]:
         return self._last_segment

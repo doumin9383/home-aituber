@@ -37,8 +37,10 @@ class RadioServerIntegration:
     """Integrates radio tick engine + memory worker into the FastAPI server.
 
     Creates and manages:
-    - /radio-ws WebSocket: pushes radio segments, receives comment/feedback
+    - /radio-ws WebSocket: pushes radio segments, receives comment/feedback,
+      handles mode/language switching commands
     - /api/feedback HTTP POST: alternative feedback submission endpoint
+    - /api/state HTTP GET: returns current mode, language, and engine status
     - RadioTickEngine background task
     - Periodic memory consolidation worker
     """
@@ -65,6 +67,10 @@ class RadioServerIntegration:
         self._memory_worker = MemoryWorker(soul_dir)
         self._tts_engine = None  # Set via set_tts_engine() after server init
 
+        # Mode / Language state
+        self.current_mode: str = "radio"      # "chat" | "radio" | "radio-chat"
+        self.current_language: str = "en-jp"   # "en" | "jp" | "en-jp" | "en-jp-note" | "mixed"
+
     def set_tts_engine(self, tts_engine) -> None:
         """Set the TTS engine reference after server initialization."""
         self._tts_engine = tts_engine
@@ -86,6 +92,15 @@ class RadioServerIntegration:
             self._memory_worker.write_feedback(event)
             return {"status": "ok"}
 
+        # ── HTTP state endpoint ──
+        @app.get("/api/state")
+        async def get_state():
+            return {
+                "mode": self.current_mode,
+                "language": self.current_language,
+                "engine_running": self.is_running,
+            }
+
         # ── Radio WebSocket ──
         @app.websocket("/radio-ws")
         async def radio_websocket(websocket: WebSocket):
@@ -93,6 +108,14 @@ class RadioServerIntegration:
             client_host = websocket.client.host if websocket.client else "unknown"
             logger.info(f"Radio WebSocket client connected: {client_host}")
             self._radio_clients.add(websocket)
+
+            # Send current state on connect
+            await websocket.send_json({
+                "type": "state-sync",
+                "mode": self.current_mode,
+                "language": self.current_language,
+                "engine_running": self.is_running,
+            })
 
             try:
                 while True:
@@ -107,11 +130,53 @@ class RadioServerIntegration:
                         # Client requests an immediate radio segment
                         mood = msg.get("mood")
                         if self._engine:
-                            segment = await self._engine.generate_segment(mood=mood)
+                            segment = await self._engine.generate_segment(
+                                mood=mood,
+                                language_mode=self.current_language,
+                            )
                             if segment:
                                 # Run TTS playback before notifying frontend
                                 await self._engine._playback_segment(segment)
                                 await self._broadcast_segment(segment)
+
+                    elif msg_type == "set-mode":
+                        mode = msg.get("mode", "radio")
+                        valid_modes = ("chat", "radio", "radio-chat")
+                        if mode not in valid_modes:
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": f"Invalid mode: {mode}. Valid: {valid_modes}",
+                            })
+                            continue
+                        self.current_mode = mode
+                        logger.info(f"Mode set to: {mode}")
+                        await websocket.send_json({
+                            "type": "mode-changed",
+                            "mode": mode,
+                        })
+                        # Broadcast mode change to all clients
+                        await self._broadcast_state()
+
+                    elif msg_type == "set-language":
+                        lang = msg.get("language", "en-jp")
+                        from homeaituber.radio_prompt_builder import LANGUAGE_SCHEMAS
+                        if lang not in LANGUAGE_SCHEMAS:
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": f"Invalid language: {lang}. Valid: {list(LANGUAGE_SCHEMAS.keys())}",
+                            })
+                            continue
+                        self.current_language = lang
+                        logger.info(f"Language set to: {lang}")
+                        # Propagate to engine for auto-ticks
+                        if self._engine:
+                            self._engine.set_language_mode(lang)
+                        await websocket.send_json({
+                            "type": "language-changed",
+                            "language": lang,
+                        })
+                        # Broadcast language change to all clients
+                        await self._broadcast_state()
 
                     elif msg_type in ("comment", "feedback"):
                         # Save user comment/feedback
@@ -156,6 +221,25 @@ class RadioServerIntegration:
                     await ws.send_text(payload_json)
             except Exception as e:
                 logger.warning(f"Failed to send to radio client: {e}")
+                dead_clients.add(ws)
+        self._radio_clients -= dead_clients
+
+    async def _broadcast_state(self) -> None:
+        """Broadcast current mode/language state to all connected WebSocket clients."""
+        payload = {
+            "type": "state-sync",
+            "mode": self.current_mode,
+            "language": self.current_language,
+            "engine_running": self.is_running,
+        }
+        dead_clients: Set[WebSocket] = set()
+        for ws in self._radio_clients:
+            try:
+                if ws.client_state == WebSocketState.CONNECTED:
+                    payload_json = json.dumps(payload, ensure_ascii=False)
+                    await ws.send_text(payload_json)
+            except Exception as e:
+                logger.warning(f"Failed to broadcast state: {e}")
                 dead_clients.add(ws)
         self._radio_clients -= dead_clients
 

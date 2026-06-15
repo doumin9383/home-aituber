@@ -9,7 +9,7 @@
     <script type="module" crossorigin src="./assets/main-nu7uwxNJ.js"></script>
     <script>
       // ═══════════════════════════════════════════════════════════
-      //  HomeAITuber Control Panel v3 — state-aware
+      //  HomeAITuber Control Panel v4 — mode/language switching
       // ═══════════════════════════════════════════════════════════
       (function() {
         // ── state ──
@@ -20,11 +20,40 @@
         let recentSegments = [];
         const MAX_RECENT = 5;
 
-        // Radio lifecycle: idle → generating → playing → idle
-        let _radioState = 'idle';  // 'idle' | 'generating' | 'playing'
-        let _radioAudioQueue = [];
-        let _radioAudioPlaying = false;
-        let _currentAudio = null;  // currently playing Audio element
+        // Mode & Language (synced with backend)
+        let currentMode = localStorage.getItem('ha-mode') || 'radio';
+        let currentLanguage = localStorage.getItem('ha-language') || 'en-jp';
+
+        const MODES = [
+          { id: 'chat',       label: '💬 Chat',       desc: 'チャット' },
+          { id: 'radio',      label: '📻 Radio',      desc: 'ラジオ' },
+          { id: 'radio-chat', label: '🎙️ Radio+Chat', desc: 'ラジオ+チャット' },
+        ];
+        const LANGS = [
+          { id: 'en',         label: '🇬🇧 EN',       desc: '英語のみ' },
+          { id: 'jp',         label: '🇯🇵 JP',       desc: '日本語のみ' },
+          { id: 'en-jp',      label: '🔁 EN→JP',   desc: '英→日' },
+          { id: 'en-jp-note', label: '📖 EN→JP→解', desc: '解説付き' },
+          { id: 'mixed',      label: '🎲 Mix',       desc: '混合' },
+        ];
+
+        function persistState() {
+          localStorage.setItem('ha-mode', currentMode);
+          localStorage.setItem('ha-language', currentLanguage);
+        }
+
+        // ── Root margin for chat input clearance ──
+        const PANEL_HANDLE_HEIGHT = 44; // collapsed bar height
+        function updateRootMargin() {
+          const body = document.body;
+          const panel = document.getElementById('ha-panel-container');
+          if (panelOpen && panel) {
+            const panelHeight = panel.getBoundingClientRect().height;
+            body.style.paddingBottom = panelHeight + 'px';
+          } else {
+            body.style.paddingBottom = PANEL_HANDLE_HEIGHT + 'px';
+          }
+        }
 
         // ── Live2D visibility ──
         function setLive2DVisible(visible) {
@@ -42,90 +71,6 @@
           }
         }
 
-        // ── Radio button state ──
-        function setRadioState(state) {
-          _radioState = state;
-          const btn = document.getElementById('ha-radio-btn');
-          if (!btn) return;
-          const states = {
-            idle:     ['📻 ラジオ発火', '#ff6b9d', false],
-            generating: ['⏳ 生成中...', '#ffd93d', true],
-            playing:  ['🔊 再生中...', '#4ecca3', false],
-          };
-          const [text, color, disabled] = states[state] || states.idle;
-          btn.textContent = text;
-          btn.style.background = color;
-          btn.disabled = disabled;
-          btn.style.opacity = disabled ? '0.6' : '1';
-        }
-
-        // ── Live2D helpers ──
-        function _getLive2DModel() {
-          try {
-            const adapter = window.getLAppAdapter && window.getLAppAdapter();
-            return adapter && adapter.getModel();
-          } catch(e) { return null; }
-        }
-
-        function _setLive2DExpression(mood) {
-          try {
-            const model = _getLive2DModel();
-            if (!model || !model.setExpression || !model._modelSetting) return;
-
-            // mao_pro expression name mapping (emotionMap indices → exp names)
-            // neutral=0, fear/sadness=1, anger/disgust=2, joy/smirk/surprise=3
-            const moodExprIdx = {
-              chaotic: [3, 3, 3],        // joy/smirk/surprise → exp_04
-              chill: [0],                 // neutral → exp_01
-              brisk: [3],                 // joy → exp_04
-              thoughtful: [0, 1],         // neutral or sadness → exp_01 or exp_02
-            };
-            const choices = moodExprIdx[mood] || [0];
-            const idx = choices[Math.floor(Math.random() * choices.length)];
-            const name = model._modelSetting.getExpressionName(idx);
-            if (!name) return;
-
-            console.log('[HA Live2D] Expression:', name, '(idx', idx, ') from mood:', mood);
-            model.setExpression(name);
-          } catch(e) { console.warn('[HA Live2D] Expression failed:', e); }
-        }
-
-        function _startLive2DLipSync(url) {
-          try {
-            const model = _getLive2DModel();
-            if (model && model._wavFileHandler && model._lipsync) {
-              console.log('[HA Live2D] Lip sync start');
-              model._wavFileHandler.start(url);
-            }
-          } catch(e) { console.warn('[HA Live2D] Lip sync start failed:', e); }
-        }
-
-        function _stopLive2DLipSync() {
-          try {
-            const model = _getLive2DModel();
-            if (model && model._wavFileHandler) {
-              model._wavFileHandler.releasePcmData();
-              // Reset internal state to avoid stale RMS on next playback
-              if (model._wavFileHandler._lastRms !== undefined) model._wavFileHandler._lastRms = 0;
-              if (model._wavFileHandler._sampleOffset !== undefined) model._wavFileHandler._sampleOffset = 0;
-              if (model._wavFileHandler._userTimeSeconds !== undefined) model._wavFileHandler._userTimeSeconds = 0;
-            }
-          } catch(e) {}
-        }
-
-        function stopAllRadioAudio() {
-          _stopLive2DLipSync();
-          if (_currentAudio) {
-            _currentAudio.pause();
-            if (_currentAudio.src) URL.revokeObjectURL(_currentAudio.src);
-            _currentAudio = null;
-          }
-          // Flush queue and revoke URLs
-          _radioAudioQueue.forEach(url => URL.revokeObjectURL(url));
-          _radioAudioQueue = [];
-          _radioAudioPlaying = false;
-        }
-
         // ── Radio WS ──
         function connectRadioWS() {
           const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -136,6 +81,7 @@
               console.log('[HA Radio] Connected');
               _radioReconnectDelay = 1000;
               updateStatus('connected');
+              // Server sends state-sync on connect — we'll pick it up in onmessage
             };
             radioWs.onmessage = (event) => {
               try {
@@ -143,10 +89,28 @@
                 if (msg.type === 'radio-segment' && msg.segment) {
                   addRecentSegment(msg.segment);
                   showRadioOverlay(msg.segment);
-                  // Transition: generating → playing
-                  if (_radioState === 'generating') setRadioState('playing');
                 } else if (msg.type === 'audio' && msg.audio) {
                   playRadioAudio(msg);
+                } else if (msg.type === 'state-sync') {
+                  // Sync mode/language from server (or another client)
+                  if (msg.mode && msg.mode !== currentMode) {
+                    currentMode = msg.mode;
+                    persistState();
+                    updateModeButtons();
+                  }
+                  if (msg.language && msg.language !== currentLanguage) {
+                    currentLanguage = msg.language;
+                    persistState();
+                    updateLanguageButtons();
+                  }
+                } else if (msg.type === 'mode-changed') {
+                  currentMode = msg.mode;
+                  persistState();
+                  updateModeButtons();
+                } else if (msg.type === 'language-changed') {
+                  currentLanguage = msg.language;
+                  persistState();
+                  updateLanguageButtons();
                 } else if (msg.type === 'pong') {
                   // keepalive
                 }
@@ -172,23 +136,50 @@
         }
 
         function triggerRadio(mood) {
-          if (_radioState === 'generating') {
-            // Debounce: already generating, ignore double-tap
-            return;
-          }
-          if (_radioState === 'playing') {
-            // Interrupt: stop current audio, flush queue, fire new
-            stopAllRadioAudio();
-          }
-          setRadioState('generating');
           sendRadioCommand({ type: 'request-radio', mood: mood || null });
+          // Flash the button
+          const btn = document.getElementById('ha-radio-btn');
+          if (btn) {
+            btn.style.transform = 'scale(0.92)';
+            setTimeout(() => { btn.style.transform = ''; }, 150);
+          }
+        }
+
+        function setMode(mode) {
+          if (mode === currentMode) return;
+          currentMode = mode;
+          persistState();
+          updateModeButtons();
+          sendRadioCommand({ type: 'set-mode', mode: mode });
+        }
+
+        function setLanguage(lang) {
+          if (lang === currentLanguage) return;
+          currentLanguage = lang;
+          persistState();
+          updateLanguageButtons();
+          sendRadioCommand({ type: 'set-language', language: lang });
+        }
+
+        function updateModeButtons() {
+          document.querySelectorAll('#ha-mode-row .ha-btn-sm').forEach(btn => {
+            const active = btn.dataset.mode === currentMode;
+            btn.classList.toggle('ha-btn-active', active);
+          });
+        }
+
+        function updateLanguageButtons() {
+          document.querySelectorAll('#ha-lang-row .ha-btn-sm').forEach(btn => {
+            const active = btn.dataset.lang === currentLanguage;
+            btn.classList.toggle('ha-btn-active', active);
+          });
         }
 
         function updateStatus(state) {
           const el = document.getElementById('ha-status');
           if (!el) return;
           const map = {
-            connected: ['●', '#4ecca3', 'ラジオ接続中'],
+            connected: ['●', '#4ecca3', '接続中'],
             reconnecting: ['◐', '#ffd93d', '再接続中...'],
             error: ['○', '#ff6b6b', '未接続'],
           };
@@ -225,9 +216,6 @@
           const old = document.getElementById('ha-radio-overlay');
           if (old) old.remove();
 
-          // ── Live2D expression from mood ──
-          _setLive2DExpression(seg.mood);
-
           const moodColors = { chaotic: '#ff6b6b', chill: '#a8d8ea', brisk: '#4ecca3', thoughtful: '#ffd93d' };
           const mc = moodColors[seg.mood] || '#4ecca3';
 
@@ -245,7 +233,7 @@
               ${seg.phrase ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #0f3460;color:#ff6b9d;font-size:12px;">💡 ${esc(seg.phrase)} — ${esc(seg.note||'')}</div>` : ''}
             </div>
           `;
-          overlay.style.cssText = 'position:fixed;bottom:140px;left:50%;transform:translateX(-50%);z-index:9998;animation:haFadeIn 0.3s ease;pointer-events:none;width:100%;max-width:500px;';
+          overlay.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);z-index:9998;animation:haFadeIn 0.3s ease;pointer-events:none;width:100%;max-width:500px;';
           document.body.appendChild(overlay);
           setTimeout(() => {
             overlay.style.opacity = '0';
@@ -262,6 +250,9 @@
         }
 
         // ── Audio playback (queued, sequential) ──
+        let _radioAudioQueue = [];
+        let _radioAudioPlaying = false;
+
         function playRadioAudio(msg) {
           try {
             const binaryStr = atob(msg.audio);
@@ -277,34 +268,18 @@
         }
 
         function _playNextInQueue() {
-          if (_radioAudioPlaying || _radioAudioQueue.length === 0) {
-            // Queue drained → idle
-            if (_radioAudioQueue.length === 0 && _radioState === 'playing') {
-              setRadioState('idle');
-            }
-            return;
-          }
+          if (_radioAudioPlaying || _radioAudioQueue.length === 0) return;
           _radioAudioPlaying = true;
           const url = _radioAudioQueue.shift();
           const audio = new Audio(url);
-          _currentAudio = audio;
-
-          // ── Live2D lip sync: feed WAV to Cubism handler when audio is ready ──
-          audio.addEventListener('canplaythrough', () => {
-            _startLive2DLipSync(url);
-          });
-
           audio.play().catch(e => {
             console.warn('[HA Radio] Audio play failed:', e);
             URL.revokeObjectURL(url);
-            _currentAudio = null;
             _radioAudioPlaying = false;
             _playNextInQueue();
           });
           audio.onended = () => {
-            _stopLive2DLipSync();
             URL.revokeObjectURL(url);
-            _currentAudio = null;
             _radioAudioPlaying = false;
             setTimeout(() => _playNextInQueue(), 200);
           };
@@ -335,6 +310,11 @@
             console.log('[HA Radio] Tab visible, reconnecting...');
             connectRadioWS();
           }
+        });
+
+        // ── Resize → update root margin ──
+        window.addEventListener('resize', () => {
+          if (panelOpen) updateRootMargin();
         });
 
         // ── Build control panel ──
@@ -395,11 +375,11 @@
                 padding: 0 12px 16px;
                 display: flex;
                 flex-direction: column;
-                gap: 10px;
+                gap: 8px;
               }
               .ha-row {
                 display: flex;
-                gap: 8px;
+                gap: 6px;
                 align-items: center;
                 flex-wrap: wrap;
               }
@@ -417,6 +397,27 @@
                 white-space: nowrap;
               }
               .ha-btn:active { transform: scale(0.95); }
+              .ha-btn-sm {
+                padding: 7px 10px;
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 8px;
+                background: rgba(255,255,255,0.05);
+                color: #999;
+                font-size: 11px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.15s;
+                white-space: nowrap;
+                flex: 1;
+                min-width: 0;
+                text-align: center;
+              }
+              .ha-btn-sm:active { transform: scale(0.95); }
+              .ha-btn-active {
+                background: rgba(78,204,163,0.20);
+                border-color: #4ecca3;
+                color: #4ecca3;
+              }
               .ha-btn-gfx { background: #4ecca3; color: #1a1a2e; flex: 1; min-width: 90px; }
               .ha-btn-radio { background: #ff6b9d; color: #fff; flex: 2; min-width: 120px; font-size: 15px; }
               .ha-btn-mood {
@@ -428,25 +429,30 @@
                 flex: 1;
                 min-width: 70px;
                 text-align: center;
+                border: 1px solid transparent;
+                cursor: pointer;
+                transition: all 0.15s;
               }
               .ha-btn-mood.active { background: rgba(78,204,163,0.25); color: #4ecca3; border: 1px solid #4ecca3; }
               .ha-label {
                 color: #888;
                 font-size: 10px;
                 text-transform: uppercase;
-                letter-spacing: 1px;
+                letter-spacing: 0.5px;
                 margin-bottom: 2px;
               }
               .ha-recent {
-                max-height: 180px;
+                max-height: 140px;
                 overflow-y: auto;
                 font-size: 11px;
                 -webkit-overflow-scrolling: touch;
               }
+              /* mobile tweaks */
               @media (max-width: 400px) {
                 .ha-btn { padding: 8px 12px; font-size: 12px; }
                 .ha-btn-radio { font-size: 14px; }
                 .ha-btn-mood { padding: 6px 10px; font-size: 10px; }
+                .ha-btn-sm { padding: 6px 8px; font-size: 10px; }
               }
             </style>
             <div class="ha-panel-container" id="ha-panel-container">
@@ -456,12 +462,16 @@
                 <span class="ha-panel-chevron">▼</span>
               </div>
               <div class="ha-panel-body">
-                <div class="ha-row">
-                  <button class="ha-btn ha-btn-gfx" id="ha-gfx-btn" onclick="window.__ha_toggleGfx()">🖼️ ON</button>
-                  <button class="ha-btn ha-btn-radio" id="ha-radio-btn" onclick="window.__ha_fireRadio()">📻 ラジオ発火</button>
+                <div>
+                  <div class="ha-label">📋 Mode</div>
+                  <div class="ha-row" id="ha-mode-row"></div>
                 </div>
                 <div>
-                  <div class="ha-label">Mood</div>
+                  <div class="ha-label">🌐 Language</div>
+                  <div class="ha-row" id="ha-lang-row"></div>
+                </div>
+                <div>
+                  <div class="ha-label">🎭 Mood</div>
                   <div class="ha-row" id="ha-mood-row">
                     <button class="ha-btn ha-btn-mood active" data-mood=""  onclick="window.__ha_setMood(this)">auto</button>
                     <button class="ha-btn ha-btn-mood" data-mood="chaotic" onclick="window.__ha_setMood(this)">🤪 chaotic</button>
@@ -469,6 +479,10 @@
                     <button class="ha-btn ha-btn-mood" data-mood="brisk" onclick="window.__ha_setMood(this)">⚡ brisk</button>
                     <button class="ha-btn ha-btn-mood" data-mood="thoughtful" onclick="window.__ha_setMood(this)">🤔 thoughtful</button>
                   </div>
+                </div>
+                <div class="ha-row">
+                  <button class="ha-btn ha-btn-gfx" id="ha-gfx-btn" onclick="window.__ha_toggleGfx()">🖼️ ON</button>
+                  <button class="ha-btn ha-btn-radio" id="ha-radio-btn" onclick="window.__ha_fireRadio()">📻 ラジオ発火</button>
                 </div>
                 <div>
                   <div class="ha-label">📜 最近のラジオ</div>
@@ -481,13 +495,45 @@
           `;
           document.body.appendChild(panel);
 
+          // Build mode buttons
+          const modeRow = document.getElementById('ha-mode-row');
+          MODES.forEach(m => {
+            const btn = document.createElement('button');
+            btn.className = 'ha-btn-sm';
+            btn.dataset.mode = m.id;
+            btn.textContent = m.label;
+            btn.title = m.desc;
+            btn.addEventListener('click', () => setMode(m.id));
+            modeRow.appendChild(btn);
+          });
+
+          // Build language buttons
+          const langRow = document.getElementById('ha-lang-row');
+          LANGS.forEach(l => {
+            const btn = document.createElement('button');
+            btn.className = 'ha-btn-sm';
+            btn.dataset.lang = l.id;
+            btn.textContent = l.label;
+            btn.title = l.desc;
+            btn.addEventListener('click', () => setLanguage(l.id));
+            langRow.appendChild(btn);
+          });
+
+          // Apply initial state
+          updateModeButtons();
+          updateLanguageButtons();
+
+          // Panel collapse/expand
           document.getElementById('ha-panel-handle').addEventListener('click', () => {
             panelOpen = !panelOpen;
             const container = document.getElementById('ha-panel-container');
             if (panelOpen) container.classList.remove('collapsed');
             else container.classList.add('collapsed');
+            // Wait for transition then update margin
+            setTimeout(updateRootMargin, 50);
           });
 
+          // Global handlers
           window.__ha_toggleGfx = () => setLive2DVisible(!graphicsEnabled);
           window.__ha_setMood = (btn) => {
             document.querySelectorAll('#ha-mood-row .ha-btn-mood').forEach(b => b.classList.remove('active'));
@@ -499,9 +545,14 @@
             triggerRadio(mood || undefined);
           };
 
+          // Set initial root margin
+          updateRootMargin();
+
+          // Collapse by default on mobile (portrait)
           if (window.innerWidth < 600 && window.innerHeight < 800) {
             panelOpen = false;
             document.getElementById('ha-panel-container').classList.add('collapsed');
+            updateRootMargin();
           }
         }
 
@@ -512,14 +563,17 @@
           interceptChatWebSocket();
         }
 
+        // Go immediately — don't wait for canvas
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', () => setTimeout(init, 500));
         } else {
           setTimeout(init, 500);
         }
 
+        // Also try on canvas appearance (for Live2D toggle to work properly)
         const obs = new MutationObserver(() => {
           if (document.querySelector('canvas')) {
+            // Live2D loaded — ensure gfx state is correct
             if (!graphicsEnabled) setLive2DVisible(false);
           }
         });
