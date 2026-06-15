@@ -31,24 +31,46 @@ home-aituber/
   │   ├─ radio_tick.py            # Periodic segment generation + TTS playback
   │   ├─ server_integration.py    # FastAPI hooks: /radio-ws, /api/feedback, TTS wiring
   │   ├─ memory_worker.py         # Comment → feedback → soul learning
-  │   ├─ feedback_logger.py       # Feedback event I/O
-  │   └─ audio_only_frontend/     # Minimal audio-first web UI
+  │   └─ feedback_logger.py       # Feedback event I/O
   ├─ soul/                       # Local state directory (identity, memory, weights)
-  │   ├─ identity.md
-  │   ├─ user_profile.json
-  │   ├─ topic_weights.json
-  │   ├─ learning_state.json
-  │   ├─ review_queue.json
-  │   ├─ dream_journal.jsonl
-  │   ├─ daily_cache.md
-  │   └─ feedback_log.jsonl
   ├─ deploy/k8s/                 # k3s deployment manifests
-  │   ├─ homeaituber.yaml         # Deployment + ConfigMap + PVC + RoleBinding
-  │   └─ frontend-index-template.html  # Custom frontend injected at init
-  ├─ characters/                 # Character configs (Open-LLM-VTuber)
+  │   └─ homeaituber.yaml         # Deployment + ConfigMap + PVC + RoleBinding
+  ├─ frontend/ (submodule → doumin9383/Open-LLM-VTuber-Web, gh-pages-build)
+  │   ├─ index.html               # Built React app (includes HA panel)
+  │   ├─ assets/                  # JS/CSS bundles
+  │   └─ libs/                    # Live2D + VAD wasm/onnx
+  ├─ characters/                 # Character configs
   ├─ config_templates/           # Default configs
   ├─ chat_history/               # Conversation logs
   └─ SPEC.md                     # Full specification
+```
+
+## Frontend Architecture (v2)
+
+The frontend is a forked and built version of `Open-LLM-VTuber-Web` (React/TypeScript/Vite/ChakraUI).
+Source: `doumin9383/Open-LLM-VTuber-Web` (main branch)
+Built output: `gh-pages-build` branch, served via git submodule.
+
+### Custom additions (in `src/renderer/src/`):
+- `components/homeaituber/HomeAITuberPanel.tsx` — HA controls in sidebar
+- `hooks/homeaituber/use-radio-ws.ts` — Radio WebSocket hook
+- Sidebar integration in `components/sidebar/sidebar.tsx`
+
+### Build workflow:
+```bash
+cd /opt/data/home-aituber-web-src
+npm install
+npm run build:web              # → dist/web/
+git checkout gh-pages-build
+cp -r dist/web/* .
+git commit && git push
+```
+Then update submodule in home-aituber:
+```bash
+cd /opt/data/home-aituber/frontend
+git fetch origin gh-pages-build
+git checkout origin/gh-pages-build
+cd .. && git add frontend && git commit
 ```
 
 ## Implementation Status
