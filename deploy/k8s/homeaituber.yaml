@@ -180,14 +180,9 @@ spec:
                 echo "ConfigMap conf.yaml applied"
               fi
 
-              # ── 4.5. Copy HomeAITuber frontend template over submodule ──
-              # The frontend/ directory is an upstream submodule (Open-LLM-VTuber-Web).
-              # Replace its vanilla index.html with our customized template that includes
-              # graphics toggle, radio segment overlay, chat interception, and
-              # visibilitychange-based mobile WebSocket reconnection.
-              cp /workspace/home-aituber/deploy/k8s/frontend-index-template.html \
-                /workspace/home-aituber/frontend/index.html
-              echo "HomeAITuber frontend template applied"
+              # ── 4.5. REMOVED — frontend is now built from doumin9383/Open-LLM-VTuber-Web
+              # which already includes HomeAITuber control panel in sidebar.
+              # No template injection needed.
 
               # ── 5. Patch frontend JS URLs (hardcoded ws/http) ──
               # Replace ws://127.0.0.1:PORT with ws://<service>:PORT
