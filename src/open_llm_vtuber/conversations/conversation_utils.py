@@ -175,8 +175,8 @@ async def finalize_conversation_turn(
         )
 
         if not response:
-            logger.warning(f"No playback completion response from {client_uid}")
-            return
+            logger.warning(f"No playback completion response from {client_uid} — sending chain-end anyway")
+            # Fall through to send chain-end signal even without frontend confirmation
 
     await websocket_send(json.dumps({"type": "force-new-message"}))
 
