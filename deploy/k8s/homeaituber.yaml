@@ -33,20 +33,29 @@ data:
 
     # ── HomeAITuber streaming config ──
     homeaituber_config:
+      agents:
+        - name: "HomeAITuber"
+          type: main
+          # All nulls → inherit from character_config
+        - name: "Director"
+          type: director
+          persona_prompt: >
+            You are a conversation director for a home AITuber streaming system.
+            You decide who speaks, about what topic, and in what tone.
+            Never speak on air. Output only decisions.
+          # No TTS, no Live2D (director-specific)
+
+      topics:
+        - "homelab"
+        - "local-llm"
+        - "自宅サーバー"
+        - "AI"
+
       streaming:
         enabled: true
         interval_seconds: 600
-        mood: "brisk"
-        language: "en-jp"
-
-      live2d:
-        enabled: true
 
       soul_dir: "/workspace/home-aituber/soul"
-
-      mattermost:
-        enabled: false
-        webhook_url: ""
 
     character_config:
       conf_name: 'homeaituber'

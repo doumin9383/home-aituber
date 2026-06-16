@@ -353,7 +353,8 @@ class RadioPromptBuilder:
             lines.append(f"Topics the user has been interested in: {topic_str}")
             lines.append("")
         lines.append("Talk naturally about whatever comes to mind.")
-        lines.append("Keep it warm and friendly — like chatting with a neighbor.")
+        lines.append("Keep it short — one or two sentences. Natural and flowing.")
+        lines.append("No forced format. Just chat like you'd chat with a friend nearby.")
 
         if user_command:
             lines.append("")

@@ -1,86 +1,91 @@
-"""Server integration for HomeAITuber streaming mode.
+"""
+Server integration for HomeAITuber multi-agent streaming mode.
 
-Hooks the StreamingScheduler into the Open-LLM-VTuber server lifecycle.
+Hooks the MultiAgentScheduler into the Open-LLM-VTuber server lifecycle.
 
-Key design change from the old RadioServerIntegration:
-- **No more separate radio pipeline.** The StreamingScheduler fires proactive
-  ticks through process_single_conversation — the same function used for
-  normal user chat. TTS, Live2D expressions, and lipsync all work
-  automatically through the existing /client-ws.
-- **Old /radio-ws is kept as a thin control channel** (start/stop streaming,
-  set mood/language) but audio/segments no longer go through it.
-- **Old RadioTickEngine + radio_tick.py are deprecated.**
+Design (v2 -- Director-based multi-agent):
+- AgentProfile[] from ha_config define available agents (main, guest, director)
+- Director decides topic & next speaker (when present)
+- Main + Guest agents speak through the existing /client-ws pipeline
+- Sub agents get their own ServiceContext (separate memory, same LLM pool)
 
-Usage:
-    from homeaituber.server_integration import StreamingIntegration
-
-    # After creating the FastAPI server app:
-    integration = StreamingIntegration()
-    integration.set_ws_handler(server.ws_handler)
-    integration.attach_to_app(server.app)
-
-    # On server start:
-    await integration.start()
-
-    # On server shutdown:
-    await integration.stop()
+Key changes from the old StreamingIntegration:
+- No more individual init params (soul_dir, interval, mood, language) -- all in ha_config
+- /radio-ws expanded: topic management commands + agent selection
+- MultiAgentScheduler replaces StreamingScheduler
 """
 
 import asyncio
 import json
-import logging as _logging
 from pathlib import Path
 from typing import Optional, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
-
 from loguru import logger
+
+from homeaituber.agent_profile import (
+    HomeAITuberConfig,
+    AgentProfile,
+    AgentType,
+)
 
 
 class StreamingIntegration:
-    """Integrates the StreamingScheduler into the server lifecycle.
+    """Integrates multi-agent streaming into the Open-LLM-VTuber server.
 
     Manages:
-    - StreamingScheduler: background timer that fires proactive chat ticks
-    - /radio-ws: thin control channel for mode/language/mood switching
-      (audio and segments go through the main /client-ws, NOT here)
-    - /api/feedback HTTP POST: alternative feedback submission
-    - /api/state HTTP GET: current mode/language/engine status
-    - Memory consolidation (kept from old architecture)
+    - MultiAgentScheduler: background timer that fires proactive chat ticks
+    - /radio-ws: control channel for topics, agents, mode
+    - /api/feedback: HTTP feedback submission
+    - /api/state: current mode/agent/topic status
+    - Memory consolidation
     """
 
     def __init__(
         self,
-        soul_dir: str = "soul",
-        interval_seconds: int = 600,
-        consolidation_interval_minutes: int = 30,
-        mood: str = "brisk",
-        language: str = "en-jp",
+        ha_config: HomeAITuberConfig,
     ):
-        self.soul_dir = soul_dir
-        self.interval_seconds = interval_seconds
-        self.consolidation_interval_minutes = consolidation_interval_minutes
-        self.mood = mood
-        self.language = language
+        self.ha_config = ha_config  # May be mutated at runtime (topics, interval)
+
+        self._mood = "brisk"
+        self._language = "en-jp"
 
         self._ws_handler = None  # Set via set_ws_handler()
         self._scheduler = None
 
         self._radio_clients: Set[WebSocket] = set()
         self._task: Optional[asyncio.Task] = None
-
-        # Defer memory worker import to avoid circular imports at module level
         self._memory_worker = None
 
-    def set_ws_handler(self, ws_handler) -> None:
-        """Set the WebSocketHandler reference after server initialization.
+    @property
+    def interval_seconds(self) -> int:
+        return self.ha_config.streaming.interval_seconds
 
-        The ws_handler provides access to:
-        - client_contexts[client_uid] → ServiceContext (agent, TTS, Live2D)
-        - client_connections[client_uid] → WebSocket (for sending TTS audio)
-        - current_conversation_tasks[client_uid] → task tracking (for interrupts)
-        """
+    @interval_seconds.setter
+    def interval_seconds(self, value: int) -> None:
+        self.ha_config.streaming.interval_seconds = value
+        if self._scheduler:
+            self._scheduler.interval_seconds = value
+
+    @property
+    def mood(self) -> str:
+        return self._mood
+
+    @mood.setter
+    def mood(self, value: str) -> None:
+        self._mood = value
+
+    @property
+    def language(self) -> str:
+        return self._language
+
+    @language.setter
+    def language(self, value: str) -> None:
+        self._language = value
+
+    def set_ws_handler(self, ws_handler) -> None:
+        """Set the WebSocketHandler reference after server initialization."""
         self._ws_handler = ws_handler
 
     def attach_to_app(self, app: FastAPI) -> None:
@@ -108,23 +113,22 @@ class StreamingIntegration:
                 "mode": "streaming",
                 "language": self.language,
                 "scheduler_running": self.is_running,
+                "agents": [
+                    {"name": a.name, "type": a.type.value}
+                    for a in self.ha_config.agents
+                ],
+                "topics": self.ha_config.topics,
+                "interval": self.interval_seconds,
             }
 
-        # ── Control WebSocket (thin: just mode/language/mood control) ──
+        # ── Control WebSocket (thin: just control commands) ──
         @app.websocket("/radio-ws")
         async def radio_websocket(websocket: WebSocket):
             await websocket.accept()
             client_host = websocket.client.host if websocket.client else "unknown"
             logger.info(f"Control WebSocket client connected: {client_host}")
             self._radio_clients.add(websocket)
-
-            # Send current state on connect
-            await websocket.send_json({
-                "type": "state-sync",
-                "mode": "streaming",
-                "language": self.language,
-                "scheduler_running": self.is_running,
-            })
+            await self._send_state_sync(websocket)
 
             try:
                 while True:
@@ -136,10 +140,16 @@ class StreamingIntegration:
                         await websocket.send_json({"type": "pong"})
 
                     elif msg_type == "request-radio":
-                        # Fire a streaming tick immediately (manual trigger)
                         if self._scheduler:
-                            self._scheduler.mood = msg.get("mood", self.mood)
-                            await self._scheduler.fire_immediately()
+                            mood_override = msg.get("mood")
+                            if mood_override:
+                                self.mood = mood_override
+                            topic_override = msg.get("topic")
+                            speaker_override = msg.get("speaker")
+                            await self._scheduler.fire_immediately(
+                                topic_override=topic_override,
+                                speaker_override=speaker_override,
+                            )
                         await websocket.send_json({"type": "request-ack"})
 
                     elif msg_type == "set-mode":
@@ -193,6 +203,53 @@ class StreamingIntegration:
                             "mood": mood,
                         })
 
+                    elif msg_type == "set-interval":
+                        seconds = msg.get("seconds", 600)
+                        if seconds < 10:
+                            seconds = 10
+                        elif seconds > 3600:
+                            seconds = 3600
+                        self.interval_seconds = seconds
+                        logger.info(f"Streaming interval set to: {seconds}s")
+                        await websocket.send_json({
+                            "type": "interval-changed",
+                            "seconds": seconds,
+                        })
+                        await self._broadcast_state()
+
+                    elif msg_type == "set-topic":
+                        topic = msg.get("topic", "")
+                        action = msg.get("action", "add")  # add / remove / list
+                        if action == "add" and topic:
+                            if topic not in self.ha_config.topics:
+                                self.ha_config.topics.append(topic)
+                            await websocket.send_json({
+                                "type": "topic-changed",
+                                "action": "add",
+                                "topic": topic,
+                                "topics": self.ha_config.topics,
+                            })
+                        elif action == "remove" and topic:
+                            self.ha_config.topics = [
+                                t for t in self.ha_config.topics if t != topic
+                            ]
+                            await websocket.send_json({
+                                "type": "topic-changed",
+                                "action": "remove",
+                                "topic": topic,
+                                "topics": self.ha_config.topics,
+                            })
+                        elif action == "list":
+                            await websocket.send_json({
+                                "type": "topic-list",
+                                "topics": self.ha_config.topics,
+                            })
+                        await self._broadcast_state()
+
+                    elif msg_type == "set-agents":
+                        # Future: dynamic agent add/remove
+                        pass
+
                     elif msg_type in ("comment", "feedback"):
                         self._ensure_memory_worker()
                         event = {
@@ -221,13 +278,13 @@ class StreamingIntegration:
                 self._radio_clients.discard(websocket)
 
         logger.info(
-            "Streaming integration endpoints registered: /radio-ws (control), /api/feedback"
+            "Streaming integration endpoints registered: /radio-ws (control), /api/feedback, /api/state"
         )
 
     # ── Lifecycle ──
 
     async def start(self) -> None:
-        """Create and start the streaming scheduler + consolidation."""
+        """Create and start the multi-agent streaming scheduler + consolidation."""
         if self._scheduler is not None:
             logger.warning("Streaming scheduler already started")
             return
@@ -237,15 +294,13 @@ class StreamingIntegration:
             return
 
         from homeaituber.radio_prompt_builder import RadioPromptBuilder
-        from homeaituber.streaming_scheduler import StreamingScheduler
+        from homeaituber.streaming_scheduler import MultiAgentScheduler
 
-        prompt_builder = RadioPromptBuilder(Path(self.soul_dir))
+        prompt_builder = RadioPromptBuilder(Path(self.ha_config.soul_dir))
 
-        self._scheduler = StreamingScheduler(
+        self._scheduler = MultiAgentScheduler(
             ws_handler=self._ws_handler,
-            interval_seconds=self.interval_seconds,
-            mood=self.mood,
-            language_mode=self.language,
+            ha_config=self.ha_config,
             prompt_builder=prompt_builder,
         )
 
@@ -259,9 +314,8 @@ class StreamingIntegration:
         )
 
         logger.info(
-            f"Streaming integration started (interval={self.interval_seconds}s, "
-            f"mood={self.mood}, lang={self.language}, "
-            f"consolidation={self.consolidation_interval_minutes}min)"
+            f"Multi-agent streaming started: {len(self.ha_config.agents)} agent(s), "
+            f"interval={self.interval_seconds}s"
         )
 
     async def stop(self) -> None:
@@ -283,7 +337,7 @@ class StreamingIntegration:
             except Exception:
                 pass
         self._radio_clients.clear()
-        logger.info("Streaming integration stopped")
+        logger.info("Multi-agent streaming stopped")
 
     @property
     def is_running(self) -> bool:
@@ -292,17 +346,12 @@ class StreamingIntegration:
     # ── Helpers ──
 
     def _ensure_memory_worker(self):
-        """Lazy-init memory worker."""
         if self._memory_worker is None:
             from homeaituber.memory_worker import MemoryWorker
-            self._memory_worker = MemoryWorker(self.soul_dir)
+            self._memory_worker = MemoryWorker(self.ha_config.soul_dir)
 
     async def _consolidation_loop(self) -> None:
-        """Periodic memory consolidation."""
-        interval_seconds = self.consolidation_interval_minutes * 60
-        logger.info(
-            f"Memory consolidation loop started (every {self.consolidation_interval_minutes} min)"
-        )
+        interval_seconds = 30 * 60  # 30 min (fixed, not per-config)
         while True:
             try:
                 await asyncio.sleep(interval_seconds)
@@ -313,6 +362,24 @@ class StreamingIntegration:
             except Exception as e:
                 logger.error(f"Memory consolidation error: {e}")
 
+    async def _send_state_sync(self, ws: WebSocket) -> None:
+        """Send current state to a single client."""
+        try:
+            await ws.send_json({
+                "type": "state-sync",
+                "mode": "streaming",
+                "language": self.language,
+                "scheduler_running": self.is_running,
+                "agents": [
+                    {"name": a.name, "type": a.type.value}
+                    for a in self.ha_config.agents
+                ],
+                "topics": self.ha_config.topics,
+                "interval": self.interval_seconds,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to send state-sync: {e}")
+
     async def _broadcast_state(self) -> None:
         """Broadcast current state to all control WebSocket clients."""
         payload = {
@@ -320,6 +387,12 @@ class StreamingIntegration:
             "mode": "streaming",
             "language": self.language,
             "scheduler_running": self.is_running,
+            "agents": [
+                {"name": a.name, "type": a.type.value}
+                for a in self.ha_config.agents
+            ],
+            "topics": self.ha_config.topics,
+            "interval": self.interval_seconds,
         }
         dead_clients: Set[WebSocket] = set()
         for ws in list(self._radio_clients):

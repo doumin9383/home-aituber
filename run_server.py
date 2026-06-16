@@ -149,18 +149,11 @@ def run(console_log_level: str):
     import sys
     sys.path.insert(0, os.path.dirname(__file__))
     from homeaituber.server_integration import StreamingIntegration
+    from homeaituber.homeaituber_config import load_homeaituber_config
 
-    # Read raw YAML to extract homeaituber_config (Pydantic ignores extra fields)
-    import yaml
-    with open("conf.yaml") as _f:
-        _raw_config = yaml.safe_load(_f)
-    _radio_config = _raw_config.get("homeaituber_config", {})
-
+    ha_config = load_homeaituber_config(conf_path="conf.yaml")
     streaming_integration = StreamingIntegration(
-        soul_dir=_radio_config.get("soul_dir", "soul"),
-        interval_seconds=_radio_config.get("streaming", {}).get("interval_seconds", 600),
-        mood=_radio_config.get("streaming", {}).get("mood", "brisk"),
-        language=_radio_config.get("streaming", {}).get("language", "en-jp"),
+        ha_config=ha_config,
     )
 
     # Move root static mount to end of routes so API routes take priority
