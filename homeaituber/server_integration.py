@@ -130,14 +130,19 @@ class RadioServerIntegration:
                         # Client requests an immediate radio segment
                         mood = msg.get("mood")
                         if self._engine:
+                            # Generate segment (fast: ~5-13s LLM call)
                             segment = await self._engine.generate_segment(
                                 mood=mood,
                                 language_mode=self.current_language,
                             )
                             if segment:
-                                # Run TTS playback before notifying frontend
-                                await self._engine._playback_segment(segment)
+                                # Send segment to frontend FIRST (immediate feedback)
                                 await self._broadcast_segment(segment)
+                                # Then run TTS playback as background task
+                                # (don't block the WS — browser may timeout)
+                                asyncio.create_task(
+                                    self._engine._playback_segment(segment)
+                                )
 
                     elif msg_type == "set-mode":
                         mode = msg.get("mode", "radio")

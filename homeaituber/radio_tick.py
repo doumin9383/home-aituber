@@ -248,10 +248,10 @@ class RadioTickEngine:
             logger.warning("Radio tick produced no segment")
             return
 
-        # Playback via TTS
-        await self._playback_segment(segment)
+        # Playback via TTS (background — don't block tick)
+        asyncio.create_task(self._playback_segment(segment))
 
-        # Notify frontend
+        # Notify frontend (immediate)
         if self.notify_callback:
             try:
                 await self.notify_callback(segment.to_dict())
