@@ -31,14 +31,13 @@ data:
         mcp_prompt: 'mcp_prompt'
         proactive_speak_prompt: 'proactive_speak_prompt'
 
-    # ── HomeAITuber radio mode config ──
+    # ── HomeAITuber streaming config ──
     homeaituber_config:
-      radio:
+      streaming:
         enabled: true
         interval_seconds: 600
-        llm_model: "Gemma-4-26B-A4B-it-NVFP4A16"
-        llm_base_url: "http://100.89.160.90:30099/v1"
-        llm_api_key: ""
+        mood: "brisk"
+        language: "en-jp"
 
       live2d:
         enabled: true

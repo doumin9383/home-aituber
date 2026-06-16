@@ -90,9 +90,9 @@ class WebSocketServer:
 
         # Include routes, passing the context instance
         # The context will be populated during the initialize step
-        self.app.include_router(
-            init_client_ws_route(default_context_cache=self.default_context_cache),
-        )
+        _ws_router = init_client_ws_route(default_context_cache=self.default_context_cache)
+        self.ws_handler = _ws_router.ws_handler
+        self.app.include_router(_ws_router)
         self.app.include_router(
             init_webtool_routes(default_context_cache=self.default_context_cache),
         )

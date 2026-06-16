@@ -145,10 +145,10 @@ def run(console_log_level: str):
     # Initialize the WebSocket server (synchronous part)
     server = WebSocketServer(config=config)
 
-    # ── HomeAITuber: Radio integration ──
+    # ── HomeAITuber: Streaming integration ──
     import sys
     sys.path.insert(0, os.path.dirname(__file__))
-    from homeaituber.server_integration import RadioServerIntegration
+    from homeaituber.server_integration import StreamingIntegration
 
     # Read raw YAML to extract homeaituber_config (Pydantic ignores extra fields)
     import yaml
@@ -156,11 +156,11 @@ def run(console_log_level: str):
         _raw_config = yaml.safe_load(_f)
     _radio_config = _raw_config.get("homeaituber_config", {})
 
-    radio_integration = RadioServerIntegration(
+    streaming_integration = StreamingIntegration(
         soul_dir=_radio_config.get("soul_dir", "soul"),
-        llm_base_url=_radio_config.get("radio", {}).get("llm_base_url", "http://100.89.160.90:30099/v1"),
-        llm_model=_radio_config.get("radio", {}).get("llm_model", "Gemma-4-26B-A4B-it-NVFP4A16"),
-        interval_seconds=_radio_config.get("radio", {}).get("interval_seconds", 600),
+        interval_seconds=_radio_config.get("streaming", {}).get("interval_seconds", 600),
+        mood=_radio_config.get("streaming", {}).get("mood", "brisk"),
+        language=_radio_config.get("streaming", {}).get("language", "en-jp"),
     )
 
     # Move root static mount to end of routes so API routes take priority
@@ -171,32 +171,33 @@ def run(console_log_level: str):
             _frontend_mount = server.app.routes.pop(_i)
             break
 
-    # Register radio endpoints BEFORE re-adding the root mount
-    radio_integration.attach_to_app(server.app)
+    # Register streaming endpoints BEFORE re-adding the root mount
+    streaming_integration.attach_to_app(server.app)
 
     # Re-add root mount at end so it's checked last
     if _frontend_mount is not None:
         server.app.routes.append(_frontend_mount)
 
     @server.app.on_event("startup")
-    async def start_radio():
-        logger.info("Starting HomeAITuber Radio Engine...")
-        await radio_integration.start()
-        logger.info("HomeAITuber Radio Engine started.")
+    async def start_streaming():
+        logger.info("Starting HomeAITuber Streaming Engine...")
+        # Wire the WebSocket handler (available after server init)
+        streaming_integration.set_ws_handler(server.ws_handler)
+        await streaming_integration.start()
+        logger.info("HomeAITuber Streaming Engine started.")
 
     @server.app.on_event("shutdown")
-    async def stop_radio():
-        logger.info("Stopping HomeAITuber Radio Engine...")
-        await radio_integration.stop()
-        logger.info("HomeAITuber Radio Engine stopped.")
-    # ── End HomeAITuber radio integration ──
+    async def stop_streaming():
+        logger.info("Stopping HomeAITuber Streaming Engine...")
+        await streaming_integration.stop()
+        logger.info("HomeAITuber Streaming Engine stopped.")
+    # ── End HomeAITuber streaming integration ──
 
     # Perform asynchronous initialization (loading context, etc.)
     logger.info("Initializing server context...")
     try:
         asyncio.run(server.initialize())
-        # Wire TTS engine into radio integration (now that server is initialized)
-        radio_integration.set_tts_engine(server.default_context_cache.tts_engine)
+        # ws_handler was already wired in the startup event — no TTS bypass needed
         logger.info("Server context initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize server context: {e}")

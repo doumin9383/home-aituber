@@ -299,6 +299,69 @@ class RadioPromptBuilder:
 
         return "\n".join(prompt_lines)
 
+    def build_streaming_tick(
+        self,
+        user_command: Optional[str] = None,
+        mood: Optional[str] = None,
+        language_mode: Optional[str] = None,
+    ) -> str:
+        """Build a light-weight proactive tick message for streaming mode.
+
+        Unlike build_radio_prompt (which produces a full system-like prompt
+        with JSON format instructions), this builds a natural user-message
+        that feeds into the existing chat pipeline. The system prompt
+        (with persona, Live2D expressions, etc.) is handled by the agent.
+
+        Args:
+            user_command: Optional trigger command from user
+            mood: Optional mood override
+            language_mode: Optional language mode
+
+        Returns:
+            A short prompt string suitable as user input to the agent
+        """
+        daily_cache = self.load_daily_cache()
+        topic_weights = self.load_topic_weights()
+
+        active_mood = (mood or DEFAULT_MOOD).lower()
+        mood_desc = MOOD_PROMPTS.get(active_mood, "")
+
+        active_lang = (language_mode or DEFAULT_LANGUAGE).lower()
+        lang_schema = LANGUAGE_SCHEMAS.get(active_lang, LANGUAGE_SCHEMAS[DEFAULT_LANGUAGE])
+        lang_label = lang_schema["label"]
+
+        top_topics = sorted(
+            [(k, v) for k, v in topic_weights.items() if isinstance(v, (int, float))],
+            key=lambda x: x[1],
+            reverse=True,
+        )[:5]
+        topic_str = ", ".join(f"{t[0]}({t[1]:.1f})" for t in top_topics)
+
+        daily_context = daily_cache[:500] if daily_cache else ""
+
+        lines = [
+            f"[Proactive streaming — mood: {active_mood}, language: {lang_label}]",
+            "",
+        ]
+        if mood_desc:
+            lines.append(mood_desc)
+            lines.append("")
+        if daily_context:
+            lines.append(f"Recent context: {daily_context}")
+            lines.append("")
+        if topic_str:
+            lines.append(f"Topics the user has been interested in: {topic_str}")
+            lines.append("")
+        lines.append("Talk naturally about whatever comes to mind.")
+        lines.append("Keep it warm and friendly — like chatting with a neighbor.")
+
+        if user_command:
+            lines.append("")
+            lines.append("User says:")
+            lines.append(user_command)
+
+        return "\n".join(lines)
+
     def build_chat_prompt(
         self,
         user_message: str,
@@ -336,3 +399,18 @@ class RadioPromptBuilder:
         )
 
         return "\n".join(prompt_lines)
+
+
+def standalone_streaming_tick(
+    soul_dir: str = "soul",
+    user_command: Optional[str] = None,
+    mood: Optional[str] = None,
+    language_mode: Optional[str] = None,
+) -> str:
+    """Standalone convenience function for streaming tick prompt."""
+    builder = RadioPromptBuilder(Path(soul_dir))
+    return builder.build_streaming_tick(
+        user_command=user_command,
+        mood=mood,
+        language_mode=language_mode,
+    )

@@ -25,6 +25,8 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
 
     router = APIRouter()
     ws_handler = WebSocketHandler(default_context_cache)
+    # Expose ws_handler for external access (streaming scheduler, etc.)
+    router.ws_handler = ws_handler
 
     @router.websocket("/client-ws")
     async def websocket_endpoint(websocket: WebSocket):
