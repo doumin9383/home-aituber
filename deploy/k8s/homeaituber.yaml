@@ -184,27 +184,22 @@ spec:
               # which already includes HomeAITuber control panel in sidebar.
               # No template injection needed.
 
-              # ── 5. Patch frontend JS URLs (hardcoded ws/http) ──
-              # Replace ws://127.0.0.1:PORT with ws://<service>:PORT
-              # and http://127.0.0.1:PORT with http://<service>:PORT
-              find /workspace/home-aituber/frontend -name 'main-*.js' \
-                -exec sed -i 's|ws://127.0.0.1:12393|ws://0.0.0.0:12393|g' {} + 2>/dev/null || true
-              find /workspace/home-aituber/frontend -name 'main-*.js' \
-                -exec sed -i 's|http://127.0.0.1:12393|http://0.0.0.0:12393|g' {} + 2>/dev/null || true
-
-              # ── 5b. Inject dynamic WebSocket/Base URL via window.location ──
-              # Override the hardcoded ws://0.0.0.0:12393 defaults with the
-              # actual origin the browser is using (Tailscale IP, NodePort, etc.)
-              # Skip if template (step 4.5) already includes this injection.
+              # ── 5. Frontend: inject viewport meta + dynamic localStorage URLs ──
+              # The baked-in defaults in the JS are ws://127.0.0.1:12393/client-ws
+              # and http://127.0.0.1:12393 (valid fallbacks for localhost access).
+              # These sed commands inject into index.html:
+              #   a) Viewport meta tag for mobile responsive layout
+              #   b) localStorage values so useLocalStorage() picks up the actual origin URL
               if [ -f /workspace/home-aituber/frontend/index.html ]; then
-                if grep -q 'HomeAITuber' /workspace/home-aituber/frontend/index.html 2>/dev/null; then
-                  echo "Template already applied, skipping dynamic URL injection"
-                else
-                  INJECT='<script>localStorage.removeItem("modelInfo");localStorage.setItem("wsUrl",JSON.stringify("ws://"+location.host+"/client-ws"));localStorage.setItem("baseUrl",JSON.stringify(location.origin))</script>'
-                  sed -i "s|<script type=\"module\" crossorigin src=\"./assets/main-|${INJECT}<script type=\"module\" crossorigin src=\"./assets/main-|" \
-                    /workspace/home-aituber/frontend/index.html
-                  echo "Dynamic WebSocket URL injection applied"
-                fi
+                # 5a. Add viewport meta after </title>
+                sed -i 's|</title>|</title>\n    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />|' \
+                  /workspace/home-aituber/frontend/index.html 2>/dev/null || true
+
+                # 5b. Inject localStorage script before the module script (always runs)
+                INJECT='<script>localStorage.removeItem("modelInfo");localStorage.setItem("wsUrl",JSON.stringify("ws://"+location.host+"/client-ws"));localStorage.setItem("baseUrl",JSON.stringify(location.origin))</script>'
+                sed -i "s|<script type=\"module\" crossorigin src=\"./assets/main-|${INJECT}<script type=\"module\" crossorigin src=\"./assets/main-|" \
+                  /workspace/home-aituber/frontend/index.html 2>/dev/null || true
+                echo "Viewport meta + dynamic URL injection applied to index.html"
               fi
 
               # ── 5c. Fix conversation hang: add 30s timeout + continue on timeout ──

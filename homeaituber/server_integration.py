@@ -214,7 +214,7 @@ class RadioServerIntegration:
             "segment": segment.to_dict(),
         }
         dead_clients: Set[WebSocket] = set()
-        for ws in self._radio_clients:
+        for ws in list(self._radio_clients):
             try:
                 if ws.client_state == WebSocketState.CONNECTED:
                     payload_json = json.dumps(payload, ensure_ascii=False)
@@ -222,7 +222,8 @@ class RadioServerIntegration:
             except Exception as e:
                 logger.warning(f"Failed to send to radio client: {e}")
                 dead_clients.add(ws)
-        self._radio_clients -= dead_clients
+        if dead_clients:
+            self._radio_clients -= dead_clients
 
     async def _broadcast_state(self) -> None:
         """Broadcast current mode/language state to all connected WebSocket clients."""
@@ -233,7 +234,7 @@ class RadioServerIntegration:
             "engine_running": self.is_running,
         }
         dead_clients: Set[WebSocket] = set()
-        for ws in self._radio_clients:
+        for ws in list(self._radio_clients):
             try:
                 if ws.client_state == WebSocketState.CONNECTED:
                     payload_json = json.dumps(payload, ensure_ascii=False)
@@ -241,20 +242,22 @@ class RadioServerIntegration:
             except Exception as e:
                 logger.warning(f"Failed to broadcast state: {e}")
                 dead_clients.add(ws)
-        self._radio_clients -= dead_clients
+        if dead_clients:
+            self._radio_clients -= dead_clients
 
     async def _broadcast_audio(self, audio_payload: dict) -> None:
         """Send an audio payload to all connected radio-ws clients."""
         dead_clients: Set[WebSocket] = set()
         payload_json = json.dumps(audio_payload, ensure_ascii=False)
-        for ws in self._radio_clients:
+        for ws in list(self._radio_clients):
             try:
                 if ws.client_state == WebSocketState.CONNECTED:
                     await ws.send_text(payload_json)
             except Exception as e:
                 logger.warning(f"Failed to send audio to radio client: {e}")
                 dead_clients.add(ws)
-        self._radio_clients -= dead_clients
+        if dead_clients:
+            self._radio_clients -= dead_clients
 
     async def _tts_callback(self, text: str, lang: str) -> None:
         """TTS callback for RadioTickEngine — generate audio and broadcast to frontend."""
