@@ -50,10 +50,15 @@ async def process_agent_output(
     websocket_send: WebSocketSend,
     tts_manager: TTSTaskManager,
     translate_engine: Optional[Any] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Process agent output with character information and optional translation"""
     output.display_text.name = character_config.character_name
     output.display_text.avatar = character_config.avatar
+
+    # Override display name if agent_name is in metadata (multi-agent streaming)
+    if metadata and metadata.get("agent_name"):
+        output.display_text.name = metadata["agent_name"]
 
     full_response = ""
     try:

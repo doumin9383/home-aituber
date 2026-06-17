@@ -366,6 +366,7 @@ class MultiAgentScheduler:
             "proactive_speak": user_input is None,
             "skip_memory": False,
             "skip_history": True,
+            "agent_name": agent_name,
         }
 
         task = asyncio.create_task(
