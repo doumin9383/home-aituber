@@ -268,9 +268,10 @@ class MultiAgentScheduler:
 
             if speaker_name not in [a.name.lower() for a in self.ha_config.agents]:
                 logger.warning(
-                    f"Director chose unknown agent '{speaker_name}', falling back to 'main'"
+                    f"Director chose unknown agent '{speaker_name}', "
+                    f"falling back to '{self.ha_config.speaking_agents[0].name}'"
                 )
-                speaker_name = "main"
+                speaker_name = self.ha_config.speaking_agents[0].name.lower()
 
         # ---- No director: round-robin ----
         else:
@@ -458,19 +459,22 @@ Output a JSON decision with speaker, topic (or null), direction (1 sentence), an
             )
 
         try:
-            response = await context.agent_engine.chat(
-                messages=[{"role": "user", "content": director_prompt}],
-                stream=False,
+            # Use the raw LLM directly -- the full agent pipeline
+            # (system prompt, Live2D instructions, memory, etc.) is
+            # inappropriate for the director, which only needs a short
+            # structured output.
+            director_system = (
+                director.persona_prompt
+                or "You are a conversation director. Decide who speaks next."
             )
+            messages = [{"role": "user", "content": director_prompt}]
+
             raw_text = ""
-            if isinstance(response, str):
-                raw_text = response
-            elif isinstance(response, dict):
-                raw_text = response.get("content", str(response))
-            elif response and hasattr(response, "content"):
-                raw_text = response.content
-            else:
-                raw_text = str(response)
+            async for chunk in context.agent_engine._llm.chat_completion(
+                messages=messages,
+                system=director_system,
+            ):
+                raw_text += chunk
 
             logger.debug(f"Director raw output ({len(raw_text)} chars): {raw_text[:200]}")
             return DirectorDecision(raw_text)
