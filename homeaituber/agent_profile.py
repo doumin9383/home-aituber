@@ -51,6 +51,8 @@ class StreamingConfig(BaseModel):
     """Streaming-specific settings."""
     enabled: bool = True
     interval_seconds: int = 600
+    continuous_mode: bool = False
+    continuous_pause_seconds: float = 1.5
 
 
 class HomeAITuberConfig(BaseModel):

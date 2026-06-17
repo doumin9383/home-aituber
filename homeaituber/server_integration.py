@@ -59,6 +59,16 @@ class StreamingIntegration:
         self._memory_worker = None
 
     @property
+    def continuous_mode(self) -> bool:
+        return self.ha_config.streaming.continuous_mode
+
+    @continuous_mode.setter
+    def continuous_mode(self, value: bool) -> None:
+        self.ha_config.streaming.continuous_mode = value
+        if self._scheduler:
+            self._scheduler.continuous_mode = value
+
+    @property
     def interval_seconds(self) -> int:
         return self.ha_config.streaming.interval_seconds
 
@@ -113,6 +123,7 @@ class StreamingIntegration:
                 "mode": "streaming",
                 "language": self.language,
                 "scheduler_running": self.is_running,
+                "continuous_mode": self.continuous_mode,
                 "agents": [
                     {"name": a.name, "type": a.type.value}
                     for a in self.ha_config.agents
@@ -155,6 +166,13 @@ class StreamingIntegration:
                     elif msg_type == "set-mode":
                         mode = msg.get("mode", "streaming")
                         if mode == "streaming":
+                            self.continuous_mode = False
+                            if not self.is_running:
+                                await self.start()
+                            elif self._scheduler:
+                                self._scheduler.resume()
+                        elif mode == "continuous":
+                            self.continuous_mode = True
                             if not self.is_running:
                                 await self.start()
                             elif self._scheduler:
@@ -367,7 +385,8 @@ class StreamingIntegration:
         try:
             await ws.send_json({
                 "type": "state-sync",
-                "mode": "streaming",
+                "mode": "continuous" if self.continuous_mode else "streaming",
+                "continuous_mode": self.continuous_mode,
                 "language": self.language,
                 "scheduler_running": self.is_running,
                 "agents": [
@@ -384,7 +403,8 @@ class StreamingIntegration:
         """Broadcast current state to all control WebSocket clients."""
         payload = {
             "type": "state-sync",
-            "mode": "streaming",
+            "mode": "continuous" if self.continuous_mode else "streaming",
+            "continuous_mode": self.continuous_mode,
             "language": self.language,
             "scheduler_running": self.is_running,
             "agents": [

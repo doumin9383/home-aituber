@@ -107,6 +107,8 @@ class MultiAgentScheduler:
 
         # Runtime mutable
         self.interval_seconds = ha_config.streaming.interval_seconds
+        self.continuous_mode = ha_config.streaming.continuous_mode
+        self.continuous_pause_seconds = ha_config.streaming.continuous_pause_seconds
         self.mood = "brisk"
         self.language = "en-jp"
 
@@ -209,13 +211,17 @@ class MultiAgentScheduler:
     # ---- Internal Loop ----
 
     async def _run_loop(self) -> None:
-        """Main loop: tick -> sleep -> repeat."""
+        """Main loop: tick -> (continuous: immediate, interval: sleep) -> repeat."""
         while self._running:
             if self._paused:
                 await asyncio.sleep(1)
                 continue
             await self._fire_tick()
-            await asyncio.sleep(self.interval_seconds)
+            if self.continuous_mode:
+                if self.continuous_pause_seconds > 0:
+                    await asyncio.sleep(self.continuous_pause_seconds)
+            else:
+                await asyncio.sleep(self.interval_seconds)
 
     async def _fire_tick(
         self,
