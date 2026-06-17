@@ -217,7 +217,8 @@ class MultiAgentScheduler:
                 await asyncio.sleep(1)
                 continue
             await self._fire_tick()
-            if self.continuous_mode:
+            is_continuous = self.continuous_mode or self.interval_seconds == 0
+            if is_continuous:
                 if self.continuous_pause_seconds > 0:
                     await asyncio.sleep(self.continuous_pause_seconds)
             else:

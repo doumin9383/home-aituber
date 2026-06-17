@@ -160,6 +160,7 @@ class StreamingIntegration:
                             await self._scheduler.fire_immediately(
                                 topic_override=topic_override,
                                 speaker_override=speaker_override,
+                                mood_override=mood_override,
                             )
                         await websocket.send_json({"type": "request-ack"})
 
@@ -196,6 +197,8 @@ class StreamingIntegration:
                             })
                             continue
                         self.language = lang
+                        if self._scheduler:
+                            self._scheduler.language = lang
                         logger.info(f"Streaming language set to: {lang}")
                         await websocket.send_json({
                             "type": "language-changed",
@@ -223,15 +226,23 @@ class StreamingIntegration:
 
                     elif msg_type == "set-interval":
                         seconds = msg.get("seconds", 600)
-                        if seconds < 10:
-                            seconds = 10
+                        if seconds < 0:
+                            seconds = 0
                         elif seconds > 3600:
                             seconds = 3600
                         self.interval_seconds = seconds
-                        logger.info(f"Streaming interval set to: {seconds}s")
+                        is_continuous = seconds == 0
+                        if is_continuous:
+                            self.continuous_mode = True
+                            if self._scheduler:
+                                self._scheduler.continuous_mode = True
+                        logger.info(
+                            f"Streaming {'continuous' if is_continuous else f'interval={seconds}s'}"
+                        )
                         await websocket.send_json({
                             "type": "interval-changed",
                             "seconds": seconds,
+                            "continuous": is_continuous,
                         })
                         await self._broadcast_state()
 
