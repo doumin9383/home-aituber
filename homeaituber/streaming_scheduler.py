@@ -211,7 +211,12 @@ class MultiAgentScheduler:
     # ---- Internal Loop ----
 
     async def _run_loop(self) -> None:
-        """Main loop: tick -> (continuous: immediate, interval: sleep) -> repeat."""
+        """Main loop: tick -> (continuous: immediate, interval: sleep) -> repeat.
+
+        When no client-WS is connected, poll briefly so the first tick
+        fires as soon as someone opens the page instead of waiting out
+        the full interval_seconds from startup.
+        """
         while self._running:
             if self._paused:
                 await asyncio.sleep(1)
@@ -222,7 +227,13 @@ class MultiAgentScheduler:
                 if self.continuous_pause_seconds > 0:
                     await asyncio.sleep(self.continuous_pause_seconds)
             else:
-                await asyncio.sleep(self.interval_seconds)
+                # If no client is connected, poll at 5 s so we react
+                # immediately when one connects.  Once a client is
+                # present, use the configured interval.
+                if self._resolve_client_uid():
+                    await asyncio.sleep(self.interval_seconds)
+                else:
+                    await asyncio.sleep(5)
 
     async def _fire_tick(
         self,
